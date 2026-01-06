@@ -14,7 +14,233 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      alerts: {
+        Row: {
+          affected_route_id: string | null
+          alternate_route_id: string | null
+          coordinates: Json | null
+          created_at: string
+          description: string | null
+          detected_at: string
+          id: string
+          is_active: boolean
+          location: string
+          resolved_at: string | null
+          severity: string
+          title: string
+          type: string
+        }
+        Insert: {
+          affected_route_id?: string | null
+          alternate_route_id?: string | null
+          coordinates?: Json | null
+          created_at?: string
+          description?: string | null
+          detected_at?: string
+          id?: string
+          is_active?: boolean
+          location: string
+          resolved_at?: string | null
+          severity: string
+          title: string
+          type: string
+        }
+        Update: {
+          affected_route_id?: string | null
+          alternate_route_id?: string | null
+          coordinates?: Json | null
+          created_at?: string
+          description?: string | null
+          detected_at?: string
+          id?: string
+          is_active?: boolean
+          location?: string
+          resolved_at?: string | null
+          severity?: string
+          title?: string
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "alerts_affected_route_id_fkey"
+            columns: ["affected_route_id"]
+            isOneToOne: false
+            referencedRelation: "routes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "alerts_alternate_route_id_fkey"
+            columns: ["alternate_route_id"]
+            isOneToOne: false
+            referencedRelation: "routes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cctv_cameras: {
+        Row: {
+          coordinates: Json
+          created_at: string
+          density: number
+          feed_url: string | null
+          id: string
+          last_updated: string
+          location: string
+          name: string
+          status: string
+          vehicle_count: number
+        }
+        Insert: {
+          coordinates: Json
+          created_at?: string
+          density?: number
+          feed_url?: string | null
+          id?: string
+          last_updated?: string
+          location: string
+          name: string
+          status?: string
+          vehicle_count?: number
+        }
+        Update: {
+          coordinates?: Json
+          created_at?: string
+          density?: number
+          feed_url?: string | null
+          id?: string
+          last_updated?: string
+          location?: string
+          name?: string
+          status?: string
+          vehicle_count?: number
+        }
+        Relationships: []
+      }
+      routes: {
+        Row: {
+          created_at: string
+          distance_km: number
+          end_point: string
+          estimated_time_minutes: number
+          id: string
+          is_active: boolean
+          name: string
+          route_type: string
+          start_point: string
+          updated_at: string
+          waypoints: Json
+        }
+        Insert: {
+          created_at?: string
+          distance_km: number
+          end_point: string
+          estimated_time_minutes: number
+          id?: string
+          is_active?: boolean
+          name: string
+          route_type?: string
+          start_point: string
+          updated_at?: string
+          waypoints?: Json
+        }
+        Update: {
+          created_at?: string
+          distance_km?: number
+          end_point?: string
+          estimated_time_minutes?: number
+          id?: string
+          is_active?: boolean
+          name?: string
+          route_type?: string
+          start_point?: string
+          updated_at?: string
+          waypoints?: Json
+        }
+        Relationships: []
+      }
+      traffic_data: {
+        Row: {
+          average_speed: number | null
+          coordinates: Json
+          created_at: string
+          density: number
+          id: string
+          last_updated: string
+          segment_name: string
+          vehicle_count: number
+        }
+        Insert: {
+          average_speed?: number | null
+          coordinates: Json
+          created_at?: string
+          density: number
+          id?: string
+          last_updated?: string
+          segment_name: string
+          vehicle_count?: number
+        }
+        Update: {
+          average_speed?: number | null
+          coordinates?: Json
+          created_at?: string
+          density?: number
+          id?: string
+          last_updated?: string
+          segment_name?: string
+          vehicle_count?: number
+        }
+        Relationships: []
+      }
+      vehicles: {
+        Row: {
+          created_at: string
+          current_position: Json | null
+          current_route_id: string | null
+          dispatched_at: string | null
+          driver_contact: string | null
+          driver_name: string
+          id: string
+          status: string
+          updated_at: string
+          vehicle_number: string
+          vehicle_type: string
+        }
+        Insert: {
+          created_at?: string
+          current_position?: Json | null
+          current_route_id?: string | null
+          dispatched_at?: string | null
+          driver_contact?: string | null
+          driver_name: string
+          id?: string
+          status?: string
+          updated_at?: string
+          vehicle_number: string
+          vehicle_type: string
+        }
+        Update: {
+          created_at?: string
+          current_position?: Json | null
+          current_route_id?: string | null
+          dispatched_at?: string | null
+          driver_contact?: string | null
+          driver_name?: string
+          id?: string
+          status?: string
+          updated_at?: string
+          vehicle_number?: string
+          vehicle_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vehicles_current_route_id_fkey"
+            columns: ["current_route_id"]
+            isOneToOne: false
+            referencedRelation: "routes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
