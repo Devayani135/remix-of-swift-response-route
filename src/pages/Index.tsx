@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { 
   Ambulance, 
   Clock, 
@@ -13,7 +13,7 @@ import { Header } from "@/components/layout/Header";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { TrafficDensityBar } from "@/components/dashboard/TrafficDensityBar";
 import { AlertCard } from "@/components/dashboard/AlertCard";
-import { RouteMap } from "@/components/map/RouteMap";
+import { LeafletMap } from "@/components/map/LeafletMap";
 import { VehicleDispatchForm, type DispatchData } from "@/components/forms/VehicleDispatchForm";
 import { CCTVFeedGrid } from "@/components/dashboard/CCTVFeedGrid";
 import { RouteComparison } from "@/components/dashboard/RouteComparison";
@@ -27,9 +27,26 @@ export default function Index() {
   const { segments, averageDensity, worstSegment } = useTrafficData();
   const { toast } = useToast();
   
-  const [selectedRoute, setSelectedRoute] = useState<string | null>("route-1");
+  const [selectedRoute, setSelectedRoute] = useState<string>("primary");
   const [activeVehicles, setActiveVehicles] = useState(3);
   const [dispatchedVehicle, setDispatchedVehicle] = useState<DispatchData | null>(null);
+  const [accidentDetected, setAccidentDetected] = useState(false);
+
+  // Simulate accident detection after 15 seconds
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setAccidentDetected(true);
+      toast({
+        title: "⚠️ Accident Detected!",
+        description: "YOLOv8 detected collision at Mehdipatnam. Switching to alternate route.",
+        variant: "destructive",
+      });
+      // Auto-switch to alternate route
+      setSelectedRoute("alternate1");
+    }, 15000);
+
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   const handleDispatch = (data: DispatchData) => {
     setDispatchedVehicle(data);
@@ -117,10 +134,12 @@ export default function Index() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0">
-                  <div className="h-[400px]">
-                    <RouteMap 
+                  <div className="h-[450px]">
+                    <LeafletMap 
                       showAlternate={true} 
-                      activeRoute={selectedRoute === "route-1" ? "primary" : "alternate"} 
+                      activeRoute={selectedRoute as "primary" | "alternate1" | "alternate2"}
+                      accidentDetected={accidentDetected}
+                      onRouteChange={setSelectedRoute}
                     />
                   </div>
                 </CardContent>
@@ -172,22 +191,32 @@ export default function Index() {
               <RouteComparison
                 routes={[
                   {
-                    id: "route-1",
+                    id: "primary",
                     name: "Via Mehdipatnam (Primary)",
                     distance: 12.3,
-                    estimatedTime: 8.5,
-                    trafficLevel: "moderate",
-                    congestionPoints: 2,
-                    isRecommended: true,
+                    estimatedTime: 8,
+                    trafficLevel: accidentDetected ? "heavy" : "moderate",
+                    congestionPoints: accidentDetected ? 5 : 2,
+                    isRecommended: !accidentDetected,
                     algorithm: "A*",
                   },
                   {
-                    id: "route-2",
+                    id: "alternate1",
                     name: "Via Kukatpally (Alternate)",
-                    distance: 15.8,
-                    estimatedTime: 14.2,
-                    trafficLevel: "heavy",
-                    congestionPoints: 4,
+                    distance: 18.5,
+                    estimatedTime: 14,
+                    trafficLevel: "moderate",
+                    congestionPoints: 3,
+                    isRecommended: accidentDetected,
+                    algorithm: "Dijkstra",
+                  },
+                  {
+                    id: "alternate2",
+                    name: "Via Outer Ring Road",
+                    distance: 22.1,
+                    estimatedTime: 16,
+                    trafficLevel: "clear",
+                    congestionPoints: 1,
                     algorithm: "Dijkstra",
                   },
                 ]}
