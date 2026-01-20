@@ -1,13 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Navigation, RefreshCw, Clock, Route } from "lucide-react";
+import { Navigation, RefreshCw, Clock, Route, MapPin, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
-// Real coordinates for Hyderabad route (Gachibowli to LB Nagar)
-const GACHIBOWLI = { lat: 17.4400, lng: 78.3489 };
+// Default coordinates for Hyderabad route (Gachibowli to LB Nagar)
+const DEFAULT_SOURCE = { lat: 17.4400, lng: 78.3489 };
 const LB_NAGAR = { lat: 17.3457, lng: 78.5522 };
 
 // Multiple route options with real intermediate points - base times without traffic
@@ -138,11 +139,17 @@ export function LeafletMap({
   const [vehiclePosition, setVehiclePosition] = useState(0);
   const vehicleMarkerRef = useRef<L.Marker | null>(null);
   const routeLayersRef = useRef<{ [key: string]: L.Polyline }>({});
+  const startMarkerRef = useRef<L.Marker | null>(null);
   const [showIncident, setShowIncident] = useState(accidentDetected);
   const [liveCCTVData, setLiveCCTVData] = useState(CCTV_LOCATIONS);
   const [fastestRoute, setFastestRoute] = useState<string>("primary");
   const [allRoutesInfo, setAllRoutesInfo] = useState<Array<{ key: string; congestion: number; time: number }>>([]);
   const [showAllRoutes, setShowAllRoutes] = useState(false);
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [isLocating, setIsLocating] = useState(false);
+
+  // Get current source location (user location or default)
+  const sourceLocation = userLocation || DEFAULT_SOURCE;
 
   useEffect(() => {
     setShowIncident(accidentDetected);
@@ -221,9 +228,10 @@ export function LeafletMap({
       iconAnchor: [12, 12],
     });
 
-    L.marker([GACHIBOWLI.lat, GACHIBOWLI.lng], { icon: startIcon })
+    const startMarker = L.marker([sourceLocation.lat, sourceLocation.lng], { icon: startIcon })
       .addTo(map)
-      .bindPopup("<b>Gachibowli</b><br>Start Point");
+      .bindPopup(userLocation ? "<b>Your Location</b><br>Start Point" : "<b>Gachibowli</b><br>Start Point");
+    startMarkerRef.current = startMarker;
 
     L.marker([LB_NAGAR.lat, LB_NAGAR.lng], { icon: endIcon })
       .addTo(map)
@@ -304,14 +312,14 @@ export function LeafletMap({
       iconAnchor: [16, 10],
     });
 
-    const vehicleMarker = L.marker([GACHIBOWLI.lat, GACHIBOWLI.lng], { icon: vehicleIcon }).addTo(map);
+    const vehicleMarker = L.marker([sourceLocation.lat, sourceLocation.lng], { icon: vehicleIcon }).addTo(map);
     vehicleMarkerRef.current = vehicleMarker;
 
     return () => {
       map.remove();
       mapInstanceRef.current = null;
     };
-  }, [onRouteChange]);
+  }, [onRouteChange, sourceLocation, userLocation]);
 
   // Add incident marker when accident detected
   useEffect(() => {
@@ -399,6 +407,59 @@ export function LeafletMap({
     }
   };
 
+  // Handle use my location
+  const handleUseMyLocation = useCallback(() => {
+    if (!navigator.geolocation) {
+      toast.error("Geolocation is not supported by your browser");
+      return;
+    }
+
+    setIsLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        const newLocation = { lat: latitude, lng: longitude };
+        setUserLocation(newLocation);
+        
+        // Update start marker position
+        if (startMarkerRef.current && mapInstanceRef.current) {
+          startMarkerRef.current.setLatLng([latitude, longitude]);
+          mapInstanceRef.current.panTo([latitude, longitude]);
+        }
+        
+        // Reset vehicle position to start
+        setVehiclePosition(0);
+        if (vehicleMarkerRef.current) {
+          vehicleMarkerRef.current.setLatLng([latitude, longitude]);
+        }
+        
+        toast.success("Location updated to your current position");
+        setIsLocating(false);
+      },
+      (error) => {
+        let message = "Unable to get your location";
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            message = "Location permission denied. Please enable location access.";
+            break;
+          case error.POSITION_UNAVAILABLE:
+            message = "Location information unavailable";
+            break;
+          case error.TIMEOUT:
+            message = "Location request timed out";
+            break;
+        }
+        toast.error(message);
+        setIsLocating(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      }
+    );
+  }, []);
+
   return (
     <div className="relative h-full min-h-[450px] rounded-lg overflow-hidden">
       {/* Map Container */}
@@ -440,6 +501,20 @@ export function LeafletMap({
           >
             <Route className="mr-1.5 h-3.5 w-3.5" />
             {showAllRoutes ? "Hide Routes" : "Show All Routes"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleUseMyLocation}
+            disabled={isLocating}
+            className={`bg-background/90 backdrop-blur-sm ${userLocation ? "border-success text-success" : ""}`}
+          >
+            {isLocating ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <MapPin className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            {isLocating ? "Locating..." : userLocation ? "Location Set" : "Use My Location"}
           </Button>
         </div>
       </div>
