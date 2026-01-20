@@ -3,7 +3,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { AlertTriangle, Navigation, Zap, Car, Clock } from "lucide-react";
+import { AlertTriangle, Navigation, Zap, Clock } from "lucide-react";
 
 // Real coordinates for Hyderabad route (Gachibowli to LB Nagar)
 const GACHIBOWLI = { lat: 17.4400, lng: 78.3489 };
@@ -61,20 +61,45 @@ const ROUTES = {
   },
 };
 
-// Simulated CCTV camera locations (AI City dataset reference)
+// Simulated CCTV camera locations with live traffic data
 const CCTV_LOCATIONS = [
-  { id: "cam-1", lat: 17.4285, lng: 78.3650, name: "Gachibowli Junction", vehicleCount: 45, density: 72 },
-  { id: "cam-2", lat: 17.4150, lng: 78.3820, name: "Tolichowki", vehicleCount: 38, density: 58 },
-  { id: "cam-3", lat: 17.3950, lng: 78.4150, name: "Mehdipatnam", vehicleCount: 67, density: 89 },
-  { id: "cam-4", lat: 17.3850, lng: 78.4450, name: "Attapur", vehicleCount: 32, density: 45 },
-  { id: "cam-5", lat: 17.3700, lng: 78.4800, name: "Dilsukhnagar", vehicleCount: 55, density: 78 },
-  { id: "cam-6", lat: 17.3550, lng: 78.5150, name: "Kothapet", vehicleCount: 28, density: 35 },
+  { id: "cam-1", lat: 17.4285, lng: 78.3650, name: "Gachibowli Junction", vehicleCount: 45, density: 72, route: "primary" },
+  { id: "cam-2", lat: 17.4150, lng: 78.3820, name: "Tolichowki", vehicleCount: 38, density: 58, route: "primary" },
+  { id: "cam-3", lat: 17.3950, lng: 78.4150, name: "Mehdipatnam", vehicleCount: 67, density: 89, route: "primary" },
+  { id: "cam-4", lat: 17.3850, lng: 78.4450, name: "Attapur", vehicleCount: 32, density: 45, route: "primary" },
+  { id: "cam-5", lat: 17.3700, lng: 78.4800, name: "Dilsukhnagar", vehicleCount: 55, density: 78, route: "primary" },
+  { id: "cam-6", lat: 17.3550, lng: 78.5150, name: "Kothapet", vehicleCount: 28, density: 35, route: "primary" },
 ];
 
 // Accident/incident locations for simulation
 const INCIDENTS = [
-  { id: "inc-1", lat: 17.3950, lng: 78.4150, type: "accident", description: "Two-vehicle collision" },
+  { id: "inc-1", lat: 17.3950, lng: 78.4150, type: "accident", description: "Two-vehicle collision", route: "primary" },
 ];
+
+// Helper to calculate route congestion based on live traffic
+const calculateRouteCongestion = (routeKey: string, cctvData: typeof CCTV_LOCATIONS, hasIncident: boolean) => {
+  if (routeKey === "primary" && hasIncident) return 100; // Max congestion if accident on primary
+  const routeCameras = cctvData.filter(cam => cam.route === routeKey);
+  if (routeCameras.length === 0) return 30; // Default low congestion for routes without cameras
+  return Math.round(routeCameras.reduce((sum, cam) => sum + cam.density, 0) / routeCameras.length);
+};
+
+// Find best route based on live traffic
+const findBestRoute = (cctvData: typeof CCTV_LOCATIONS, hasIncident: boolean): string => {
+  const congestionLevels = Object.keys(ROUTES).map(key => ({
+    route: key,
+    congestion: calculateRouteCongestion(key, cctvData, hasIncident),
+    time: parseInt(ROUTES[key as keyof typeof ROUTES].time),
+  }));
+  
+  // Sort by congestion first, then by time
+  congestionLevels.sort((a, b) => {
+    if (a.congestion !== b.congestion) return a.congestion - b.congestion;
+    return a.time - b.time;
+  });
+  
+  return congestionLevels[0].route;
+};
 
 interface LeafletMapProps {
   showAlternate?: boolean;
@@ -95,10 +120,40 @@ export function LeafletMap({
   const vehicleMarkerRef = useRef<L.Marker | null>(null);
   const routeLayersRef = useRef<{ [key: string]: L.Polyline }>({});
   const [showIncident, setShowIncident] = useState(accidentDetected);
+  const [liveCCTVData, setLiveCCTVData] = useState(CCTV_LOCATIONS);
+  const [recommendedRoute, setRecommendedRoute] = useState<string>("primary");
 
   useEffect(() => {
     setShowIncident(accidentDetected);
   }, [accidentDetected]);
+
+  // Simulate live traffic updates and auto-reroute when congestion detected
+  useEffect(() => {
+    const updateTraffic = () => {
+      setLiveCCTVData(prev => 
+        prev.map(cam => ({
+          ...cam,
+          vehicleCount: Math.max(10, Math.min(100, cam.vehicleCount + Math.floor(Math.random() * 20 - 10))),
+          density: Math.max(15, Math.min(95, cam.density + Math.floor(Math.random() * 15 - 7))),
+        }))
+      );
+    };
+
+    const interval = setInterval(updateTraffic, 4000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Find and recommend best route based on live traffic
+  useEffect(() => {
+    const bestRoute = findBestRoute(liveCCTVData, showIncident);
+    setRecommendedRoute(bestRoute);
+    
+    // Auto-reroute if current route has high congestion or incident
+    const currentCongestion = calculateRouteCongestion(activeRoute, liveCCTVData, showIncident);
+    if (currentCongestion >= 85 && bestRoute !== activeRoute) {
+      onRouteChange?.(bestRoute);
+    }
+  }, [liveCCTVData, showIncident, activeRoute, onRouteChange]);
 
   // Initialize map
   useEffect(() => {
@@ -307,6 +362,11 @@ export function LeafletMap({
     });
   }, [activeRoute, showAlternate]);
 
+  // Get current route congestion levels
+  const getRouteCongestion = (routeKey: string) => {
+    return calculateRouteCongestion(routeKey, liveCCTVData, showIncident);
+  };
+
   return (
     <div className="relative h-full min-h-[450px] rounded-lg overflow-hidden">
       {/* Map Container */}
@@ -317,77 +377,88 @@ export function LeafletMap({
         <div className="flex items-center gap-2 pointer-events-auto">
           <Badge variant="outline" className="bg-background/90 backdrop-blur-sm border-primary/30">
             <Navigation className="mr-1 h-3 w-3 text-primary" />
-            OpenStreetMap
+            Live Traffic
           </Badge>
-          <Badge variant="outline" className="bg-background/90 backdrop-blur-sm border-info/30 text-info">
-            <Car className="mr-1 h-3 w-3" />
-            AI City Dataset
-          </Badge>
+          {recommendedRoute !== activeRoute && (
+            <Badge 
+              variant="outline" 
+              className="bg-warning/20 backdrop-blur-sm border-warning text-warning cursor-pointer animate-pulse pointer-events-auto"
+              onClick={() => onRouteChange?.(recommendedRoute)}
+            >
+              <Zap className="mr-1 h-3 w-3" />
+              Faster Route Available
+            </Badge>
+          )}
         </div>
 
         <div className="flex gap-2 pointer-events-auto">
-          {Object.entries(ROUTES).map(([key, route]) => (
-            <Badge
-              key={key}
-              variant="outline"
-              className={`cursor-pointer transition-all ${
-                activeRoute === key
-                  ? "bg-background/95 border-2"
-                  : "bg-background/70 opacity-70 hover:opacity-100"
-              }`}
-              style={{ borderColor: route.color }}
-              onClick={() => onRouteChange?.(key)}
-            >
-              <div
-                className="mr-1.5 h-2 w-2 rounded-full"
-                style={{ backgroundColor: route.color }}
-              />
-              {route.distance}
-            </Badge>
-          ))}
-        </div>
-      </div>
-
-      {/* Accident Alert Banner */}
-      {showIncident && (
-        <div className="absolute top-16 left-4 right-4 z-[1000] pointer-events-none">
-          <Card className="bg-emergency/95 border-emergency text-emergency-foreground p-3 pointer-events-auto animate-pulse">
-            <div className="flex items-center gap-3">
-              <AlertTriangle className="h-5 w-5" />
-              <div className="flex-1">
-                <p className="font-semibold text-sm">Accident Detected at Mehdipatnam!</p>
-                <p className="text-xs opacity-90">YOLOv8 detection • Alternate route via Kukatpally recommended</p>
-              </div>
-              <Badge variant="outline" className="bg-white/20 border-white/30 text-white">
-                Switch Route
-              </Badge>
-            </div>
-          </Card>
-        </div>
-      )}
-
-      {/* Route Legend */}
-      <div className="absolute bottom-4 left-4 z-[1000] pointer-events-auto">
-        <Card className="bg-background/95 backdrop-blur-sm border-border/50 p-3">
-          <p className="text-xs font-semibold mb-2 text-muted-foreground">Routes (Click to select)</p>
-          <div className="space-y-1.5">
-            {Object.entries(ROUTES).map(([key, route]) => (
-              <div
+          {Object.entries(ROUTES).map(([key, route]) => {
+            const congestion = getRouteCongestion(key);
+            const congestionColor = congestion >= 80 ? "#ef4444" : congestion >= 50 ? "#f59e0b" : "#22c55e";
+            return (
+              <Badge
                 key={key}
-                className={`flex items-center gap-2 text-xs cursor-pointer p-1 rounded transition-colors ${
-                  activeRoute === key ? "bg-primary/10" : "hover:bg-muted/50"
-                }`}
+                variant="outline"
+                className={`cursor-pointer transition-all ${
+                  activeRoute === key
+                    ? "bg-background/95 border-2"
+                    : "bg-background/70 opacity-70 hover:opacity-100"
+                } ${key === recommendedRoute && key !== activeRoute ? "ring-2 ring-warning/50" : ""}`}
+                style={{ borderColor: route.color }}
                 onClick={() => onRouteChange?.(key)}
               >
                 <div
-                  className="h-1 w-6 rounded-full"
+                  className="mr-1.5 h-2 w-2 rounded-full"
                   style={{ backgroundColor: route.color }}
                 />
-                <span className={activeRoute === key ? "font-semibold" : "text-muted-foreground"}>
-                  {route.name}
+                {route.distance}
+                <span 
+                  className="ml-1.5 text-[10px] font-mono"
+                  style={{ color: congestionColor }}
+                >
+                  {congestion}%
                 </span>
-              </div>
-            ))}
+              </Badge>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Route Legend with Live Congestion */}
+      <div className="absolute bottom-4 left-4 z-[1000] pointer-events-auto">
+        <Card className="bg-background/95 backdrop-blur-sm border-border/50 p-3">
+          <p className="text-xs font-semibold mb-2 text-muted-foreground">Routes (Live Traffic)</p>
+          <div className="space-y-1.5">
+            {Object.entries(ROUTES).map(([key, route]) => {
+              const congestion = getRouteCongestion(key);
+              const congestionColor = congestion >= 80 ? "text-emergency" : congestion >= 50 ? "text-warning" : "text-success";
+              const isRecommended = key === recommendedRoute;
+              return (
+                <div
+                  key={key}
+                  className={`flex items-center gap-2 text-xs cursor-pointer p-1.5 rounded transition-colors ${
+                    activeRoute === key ? "bg-primary/10" : "hover:bg-muted/50"
+                  } ${isRecommended && key !== activeRoute ? "bg-warning/10 border border-warning/30" : ""}`}
+                  onClick={() => onRouteChange?.(key)}
+                >
+                  <div
+                    className="h-1 w-6 rounded-full"
+                    style={{ backgroundColor: route.color }}
+                  />
+                  <span className={activeRoute === key ? "font-semibold flex-1" : "text-muted-foreground flex-1"}>
+                    {route.name}
+                  </span>
+                  <span className={`font-mono text-[10px] ${congestionColor}`}>
+                    {congestion}%
+                  </span>
+                  {isRecommended && (
+                    <Badge variant="outline" className="text-[9px] px-1 py-0 bg-success/20 border-success/30 text-success">
+                      FASTEST
+                    </Badge>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </Card>
       </div>
@@ -412,14 +483,27 @@ export function LeafletMap({
         </Card>
       </div>
 
-      {/* Dataset Info */}
-      <div className="absolute bottom-20 right-4 z-[1000] pointer-events-auto">
-        <Card className="bg-background/90 backdrop-blur-sm border-border/50 p-2 text-xs">
-          <p className="text-muted-foreground">Data Sources:</p>
-          <p className="font-mono text-[10px]">• AI City Track 2 & 4 (2021)</p>
-          <p className="font-mono text-[10px]">• OpenStreetMap</p>
-        </Card>
-      </div>
+      {/* Accident Alert Banner - Moved to Bottom */}
+      {showIncident && (
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-[1000] pointer-events-none max-w-md w-full px-4">
+          <Card className="bg-emergency/95 border-emergency text-emergency-foreground p-3 pointer-events-auto animate-pulse">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-5 w-5 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-sm">Accident Detected!</p>
+                <p className="text-xs opacity-90 truncate">Rerouting to {ROUTES[recommendedRoute as keyof typeof ROUTES]?.name}</p>
+              </div>
+              <Badge 
+                variant="outline" 
+                className="bg-white/20 border-white/30 text-white cursor-pointer shrink-0"
+                onClick={() => onRouteChange?.(recommendedRoute)}
+              >
+                Reroute
+              </Badge>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
