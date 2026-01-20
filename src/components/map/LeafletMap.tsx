@@ -3,19 +3,20 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { AlertTriangle, Navigation, Zap, Clock } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Navigation, RefreshCw, Clock, Route } from "lucide-react";
 
 // Real coordinates for Hyderabad route (Gachibowli to LB Nagar)
 const GACHIBOWLI = { lat: 17.4400, lng: 78.3489 };
 const LB_NAGAR = { lat: 17.3457, lng: 78.5522 };
 
-// Multiple route options with real intermediate points
+// Multiple route options with real intermediate points - base times without traffic
 const ROUTES = {
   primary: {
-    name: "Via Mehdipatnam (Shortest)",
+    name: "Via Mehdipatnam",
     color: "#22c55e",
-    distance: "12.3 km",
-    time: "8 min",
+    distance: 12.3,
+    baseTime: 8, // Base time in minutes without traffic
     coordinates: [
       [17.4400, 78.3489], // Gachibowli
       [17.4285, 78.3650], // Gachibowli Junction
@@ -28,10 +29,10 @@ const ROUTES = {
     ],
   },
   alternate1: {
-    name: "Via Kukatpally (Alternate)",
+    name: "Via Kukatpally",
     color: "#3b82f6",
-    distance: "18.5 km",
-    time: "14 min",
+    distance: 18.5,
+    baseTime: 14,
     coordinates: [
       [17.4400, 78.3489], // Gachibowli
       [17.4600, 78.3700], // Kondapur
@@ -46,8 +47,8 @@ const ROUTES = {
   alternate2: {
     name: "Via Outer Ring Road",
     color: "#f59e0b",
-    distance: "22.1 km",
-    time: "16 min",
+    distance: 22.1,
+    baseTime: 16,
     coordinates: [
       [17.4400, 78.3489], // Gachibowli
       [17.4100, 78.3300], // Financial District
@@ -69,6 +70,10 @@ const CCTV_LOCATIONS = [
   { id: "cam-4", lat: 17.3850, lng: 78.4450, name: "Attapur", vehicleCount: 32, density: 45, route: "primary" },
   { id: "cam-5", lat: 17.3700, lng: 78.4800, name: "Dilsukhnagar", vehicleCount: 55, density: 78, route: "primary" },
   { id: "cam-6", lat: 17.3550, lng: 78.5150, name: "Kothapet", vehicleCount: 28, density: 35, route: "primary" },
+  { id: "cam-7", lat: 17.4600, lng: 78.3700, name: "Kondapur", vehicleCount: 42, density: 52, route: "alternate1" },
+  { id: "cam-8", lat: 17.4850, lng: 78.4100, name: "KPHB", vehicleCount: 35, density: 40, route: "alternate1" },
+  { id: "cam-9", lat: 17.4100, lng: 78.3300, name: "Financial District", vehicleCount: 25, density: 30, route: "alternate2" },
+  { id: "cam-10", lat: 17.3000, lng: 78.4200, name: "ORR South", vehicleCount: 30, density: 35, route: "alternate2" },
 ];
 
 // Accident/incident locations for simulation
@@ -76,29 +81,43 @@ const INCIDENTS = [
   { id: "inc-1", lat: 17.3950, lng: 78.4150, type: "accident", description: "Two-vehicle collision", route: "primary" },
 ];
 
-// Helper to calculate route congestion based on live traffic
-const calculateRouteCongestion = (routeKey: string, cctvData: typeof CCTV_LOCATIONS, hasIncident: boolean) => {
-  if (routeKey === "primary" && hasIncident) return 100; // Max congestion if accident on primary
+// Calculate route congestion and estimated time based on live traffic
+const calculateRouteMetrics = (routeKey: string, cctvData: typeof CCTV_LOCATIONS, hasIncident: boolean) => {
+  const route = ROUTES[routeKey as keyof typeof ROUTES];
+  if (!route) return { congestion: 0, estimatedTime: 0 };
+  
+  // Max congestion if accident on this route
+  if (hasIncident && INCIDENTS.some(inc => inc.route === routeKey)) {
+    return { congestion: 100, estimatedTime: route.baseTime * 3 }; // Triple time due to accident
+  }
+  
   const routeCameras = cctvData.filter(cam => cam.route === routeKey);
-  if (routeCameras.length === 0) return 30; // Default low congestion for routes without cameras
-  return Math.round(routeCameras.reduce((sum, cam) => sum + cam.density, 0) / routeCameras.length);
+  const avgCongestion = routeCameras.length > 0 
+    ? Math.round(routeCameras.reduce((sum, cam) => sum + cam.density, 0) / routeCameras.length)
+    : 25; // Default low congestion for routes without cameras
+  
+  // Calculate time based on congestion: higher congestion = longer time
+  const congestionMultiplier = 1 + (avgCongestion / 100) * 0.8; // 0-80% time increase
+  const estimatedTime = Math.round(route.baseTime * congestionMultiplier);
+  
+  return { congestion: avgCongestion, estimatedTime };
 };
 
-// Find best route based on live traffic
-const findBestRoute = (cctvData: typeof CCTV_LOCATIONS, hasIncident: boolean): string => {
-  const congestionLevels = Object.keys(ROUTES).map(key => ({
-    route: key,
-    congestion: calculateRouteCongestion(key, cctvData, hasIncident),
-    time: parseInt(ROUTES[key as keyof typeof ROUTES].time),
-  }));
-  
-  // Sort by congestion first, then by time
-  congestionLevels.sort((a, b) => {
-    if (a.congestion !== b.congestion) return a.congestion - b.congestion;
-    return a.time - b.time;
+// Find fastest route based on estimated travel time
+const findFastestRoute = (cctvData: typeof CCTV_LOCATIONS, hasIncident: boolean): { route: string; allRoutes: Array<{ key: string; congestion: number; time: number }> } => {
+  const allRoutes = Object.keys(ROUTES).map(key => {
+    const metrics = calculateRouteMetrics(key, cctvData, hasIncident);
+    return {
+      key,
+      congestion: metrics.congestion,
+      time: metrics.estimatedTime,
+    };
   });
   
-  return congestionLevels[0].route;
+  // Sort by estimated time (shortest first)
+  allRoutes.sort((a, b) => a.time - b.time);
+  
+  return { route: allRoutes[0].key, allRoutes };
 };
 
 interface LeafletMapProps {
@@ -121,7 +140,9 @@ export function LeafletMap({
   const routeLayersRef = useRef<{ [key: string]: L.Polyline }>({});
   const [showIncident, setShowIncident] = useState(accidentDetected);
   const [liveCCTVData, setLiveCCTVData] = useState(CCTV_LOCATIONS);
-  const [recommendedRoute, setRecommendedRoute] = useState<string>("primary");
+  const [fastestRoute, setFastestRoute] = useState<string>("primary");
+  const [allRoutesInfo, setAllRoutesInfo] = useState<Array<{ key: string; congestion: number; time: number }>>([]);
+  const [showAllRoutes, setShowAllRoutes] = useState(false);
 
   useEffect(() => {
     setShowIncident(accidentDetected);
@@ -143,15 +164,18 @@ export function LeafletMap({
     return () => clearInterval(interval);
   }, []);
 
-  // Find and recommend best route based on live traffic
+  // Find fastest route based on live traffic and update route info
   useEffect(() => {
-    const bestRoute = findBestRoute(liveCCTVData, showIncident);
-    setRecommendedRoute(bestRoute);
+    const { route, allRoutes } = findFastestRoute(liveCCTVData, showIncident);
+    setFastestRoute(route);
+    setAllRoutesInfo(allRoutes);
     
-    // Auto-reroute if current route has high congestion or incident
-    const currentCongestion = calculateRouteCongestion(activeRoute, liveCCTVData, showIncident);
-    if (currentCongestion >= 85 && bestRoute !== activeRoute) {
-      onRouteChange?.(bestRoute);
+    // Auto-reroute if current route has significantly higher time
+    const currentRouteInfo = allRoutes.find(r => r.key === activeRoute);
+    const fastestRouteInfo = allRoutes[0];
+    if (currentRouteInfo && fastestRouteInfo && currentRouteInfo.time > fastestRouteInfo.time + 3 && route !== activeRoute) {
+      // Only auto-reroute if difference is more than 3 minutes
+      onRouteChange?.(route);
     }
   }, [liveCCTVData, showIncident, activeRoute, onRouteChange]);
 
@@ -249,10 +273,11 @@ export function LeafletMap({
         dashArray: key === "primary" ? undefined : "10, 10",
       }).addTo(map);
 
+      const routeInfo = allRoutesInfo.find(r => r.key === key);
       polyline.bindPopup(`
         <b>${route.name}</b><br>
-        Distance: ${route.distance}<br>
-        Est. Time: ${route.time}
+        Distance: ${route.distance} km<br>
+        Est. Time: ${routeInfo?.time || route.baseTime} min
       `);
 
       polyline.on("click", () => {
@@ -348,23 +373,30 @@ export function LeafletMap({
     return () => clearInterval(interval);
   }, [activeRoute]);
 
-  // Update route styling based on active route
+  // Update route styling - show only fastest route unless user expands
   useEffect(() => {
     Object.entries(routeLayersRef.current).forEach(([key, polyline]) => {
       if (key === activeRoute) {
         polyline.setStyle({ weight: 6, opacity: 1, dashArray: undefined });
         polyline.bringToFront();
-      } else if (showAlternate) {
+      } else if (showAllRoutes) {
         polyline.setStyle({ weight: 4, opacity: 0.5, dashArray: "10, 10" });
       } else {
         polyline.setStyle({ opacity: 0 });
       }
     });
-  }, [activeRoute, showAlternate]);
+  }, [activeRoute, showAllRoutes]);
 
-  // Get current route congestion levels
-  const getRouteCongestion = (routeKey: string) => {
-    return calculateRouteCongestion(routeKey, liveCCTVData, showIncident);
+  // Get current route info from allRoutesInfo
+  const getRouteInfo = (routeKey: string) => {
+    return allRoutesInfo.find(r => r.key === routeKey) || { congestion: 0, time: 0 };
+  };
+
+  // Handle manual reroute
+  const handleReroute = () => {
+    if (fastestRoute !== activeRoute) {
+      onRouteChange?.(fastestRoute);
+    }
   };
 
   return (
@@ -379,131 +411,121 @@ export function LeafletMap({
             <Navigation className="mr-1 h-3 w-3 text-primary" />
             Live Traffic
           </Badge>
-          {recommendedRoute !== activeRoute && (
-            <Badge 
-              variant="outline" 
-              className="bg-warning/20 backdrop-blur-sm border-warning text-warning cursor-pointer animate-pulse pointer-events-auto"
-              onClick={() => onRouteChange?.(recommendedRoute)}
-            >
-              <Zap className="mr-1 h-3 w-3" />
-              Faster Route Available
-            </Badge>
-          )}
+          <Badge variant="outline" className="bg-background/90 backdrop-blur-sm border-success/30">
+            <Route className="mr-1 h-3 w-3 text-success" />
+            Fastest Path Active
+          </Badge>
         </div>
 
+        {/* Reroute Button */}
         <div className="flex gap-2 pointer-events-auto">
-          {Object.entries(ROUTES).map(([key, route]) => {
-            const congestion = getRouteCongestion(key);
-            const congestionColor = congestion >= 80 ? "#ef4444" : congestion >= 50 ? "#f59e0b" : "#22c55e";
-            return (
-              <Badge
-                key={key}
-                variant="outline"
-                className={`cursor-pointer transition-all ${
-                  activeRoute === key
-                    ? "bg-background/95 border-2"
-                    : "bg-background/70 opacity-70 hover:opacity-100"
-                } ${key === recommendedRoute && key !== activeRoute ? "ring-2 ring-warning/50" : ""}`}
-                style={{ borderColor: route.color }}
-                onClick={() => onRouteChange?.(key)}
-              >
-                <div
-                  className="mr-1.5 h-2 w-2 rounded-full"
-                  style={{ backgroundColor: route.color }}
-                />
-                {route.distance}
-                <span 
-                  className="ml-1.5 text-[10px] font-mono"
-                  style={{ color: congestionColor }}
-                >
-                  {congestion}%
-                </span>
-              </Badge>
-            );
-          })}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleReroute}
+            className={`bg-background/90 backdrop-blur-sm ${
+              fastestRoute !== activeRoute 
+                ? "border-warning text-warning hover:bg-warning/20 animate-pulse" 
+                : "border-muted"
+            }`}
+          >
+            <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${fastestRoute !== activeRoute ? "animate-spin" : ""}`} />
+            {fastestRoute !== activeRoute ? "Reroute Now" : "Reroute"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowAllRoutes(!showAllRoutes)}
+            className="bg-background/90 backdrop-blur-sm"
+          >
+            <Route className="mr-1.5 h-3.5 w-3.5" />
+            {showAllRoutes ? "Hide Routes" : "Show All Routes"}
+          </Button>
         </div>
       </div>
 
-      {/* Route Legend with Live Congestion */}
-      <div className="absolute bottom-4 left-4 z-[1000] pointer-events-auto">
-        <Card className="bg-background/95 backdrop-blur-sm border-border/50 p-3">
-          <p className="text-xs font-semibold mb-2 text-muted-foreground">Routes (Live Traffic)</p>
-          <div className="space-y-1.5">
-            {Object.entries(ROUTES).map(([key, route]) => {
-              const congestion = getRouteCongestion(key);
-              const congestionColor = congestion >= 80 ? "text-emergency" : congestion >= 50 ? "text-warning" : "text-success";
-              const isRecommended = key === recommendedRoute;
-              return (
-                <div
-                  key={key}
-                  className={`flex items-center gap-2 text-xs cursor-pointer p-1.5 rounded transition-colors ${
-                    activeRoute === key ? "bg-primary/10" : "hover:bg-muted/50"
-                  } ${isRecommended && key !== activeRoute ? "bg-warning/10 border border-warning/30" : ""}`}
-                  onClick={() => onRouteChange?.(key)}
-                >
+      {/* Route Legend - Only show when expanded */}
+      {showAllRoutes && (
+        <div className="absolute bottom-4 left-4 z-[1000] pointer-events-auto">
+          <Card className="bg-background/95 backdrop-blur-sm border-border/50 p-3">
+            <p className="text-xs font-semibold mb-2 text-muted-foreground">All Routes (by travel time)</p>
+            <div className="space-y-1.5">
+              {allRoutesInfo.map((routeInfo, index) => {
+                const route = ROUTES[routeInfo.key as keyof typeof ROUTES];
+                const congestionColor = routeInfo.congestion >= 80 ? "text-emergency" : routeInfo.congestion >= 50 ? "text-warning" : "text-success";
+                const isFastest = index === 0;
+                return (
                   <div
-                    className="h-1 w-6 rounded-full"
-                    style={{ backgroundColor: route.color }}
-                  />
-                  <span className={activeRoute === key ? "font-semibold flex-1" : "text-muted-foreground flex-1"}>
-                    {route.name}
-                  </span>
-                  <span className={`font-mono text-[10px] ${congestionColor}`}>
-                    {congestion}%
-                  </span>
-                  {isRecommended && (
-                    <Badge variant="outline" className="text-[9px] px-1 py-0 bg-success/20 border-success/30 text-success">
-                      FASTEST
-                    </Badge>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </Card>
+                    key={routeInfo.key}
+                    className={`flex items-center gap-2 text-xs cursor-pointer p-1.5 rounded transition-colors ${
+                      activeRoute === routeInfo.key ? "bg-primary/10" : "hover:bg-muted/50"
+                    }`}
+                    onClick={() => onRouteChange?.(routeInfo.key)}
+                  >
+                    <div
+                      className="h-1 w-6 rounded-full"
+                      style={{ backgroundColor: route.color }}
+                    />
+                    <span className={activeRoute === routeInfo.key ? "font-semibold flex-1" : "text-muted-foreground flex-1"}>
+                      {route.name}
+                    </span>
+                    <span className="font-mono text-[10px] text-foreground">
+                      {routeInfo.time} min
+                    </span>
+                    <span className={`font-mono text-[10px] ${congestionColor}`}>
+                      {routeInfo.congestion}%
+                    </span>
+                    {isFastest && (
+                      <Badge variant="outline" className="text-[9px] px-1 py-0 bg-success/20 border-success/30 text-success">
+                        FASTEST
+                      </Badge>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Active Route Info */}
+      <div className="absolute bottom-4 left-4 z-[1000] pointer-events-auto">
+        {!showAllRoutes && (
+          <Card className="bg-background/95 backdrop-blur-sm border-success/50 p-3">
+            <div className="flex items-center gap-3">
+              <div
+                className="h-3 w-3 rounded-full"
+                style={{ backgroundColor: ROUTES[activeRoute as keyof typeof ROUTES]?.color }}
+              />
+              <div>
+                <p className="text-xs text-muted-foreground">Active Route</p>
+                <p className="text-sm font-semibold">
+                  {ROUTES[activeRoute as keyof typeof ROUTES]?.name}
+                </p>
+              </div>
+            </div>
+          </Card>
+        )}
       </div>
 
       {/* ETA Display */}
       <div className="absolute bottom-4 right-4 z-[1000] pointer-events-auto">
         <Card className="bg-background/95 backdrop-blur-sm border-border/50 p-3">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-full bg-primary/10">
-              <Zap className="h-4 w-4 text-primary" />
+            <div className="p-2 rounded-full bg-success/10">
+              <Clock className="h-4 w-4 text-success" />
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Estimated Arrival</p>
               <div className="flex items-center gap-2">
-                <Clock className="h-3 w-3 text-muted-foreground" />
-                <p className="text-lg font-bold font-mono">
-                  {ROUTES[activeRoute as keyof typeof ROUTES]?.time || "8 min"}
+                <p className="text-lg font-bold font-mono text-success">
+                  {getRouteInfo(activeRoute).time || ROUTES[activeRoute as keyof typeof ROUTES]?.baseTime} min
                 </p>
               </div>
             </div>
           </div>
         </Card>
       </div>
-
-      {/* Accident Alert Banner - Moved to Bottom */}
-      {showIncident && (
-        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-[1000] pointer-events-none max-w-md w-full px-4">
-          <Card className="bg-emergency/95 border-emergency text-emergency-foreground p-3 pointer-events-auto animate-pulse">
-            <div className="flex items-center gap-3">
-              <AlertTriangle className="h-5 w-5 shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-sm">Accident Detected!</p>
-                <p className="text-xs opacity-90 truncate">Rerouting to {ROUTES[recommendedRoute as keyof typeof ROUTES]?.name}</p>
-              </div>
-              <Badge 
-                variant="outline" 
-                className="bg-white/20 border-white/30 text-white cursor-pointer shrink-0"
-                onClick={() => onRouteChange?.(recommendedRoute)}
-              >
-                Reroute
-              </Badge>
-            </div>
-          </Card>
-        </div>
-      )}
     </div>
   );
 }
