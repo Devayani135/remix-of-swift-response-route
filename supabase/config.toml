@@ -1,1 +1,4 @@
 project_id = "cyfmdaftgbzgtpaiehbe"
+
+[functions.traffic-data]
+verify_jwt = false
