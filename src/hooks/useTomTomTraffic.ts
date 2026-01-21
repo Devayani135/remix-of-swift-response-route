@@ -95,29 +95,31 @@ export function useTomTomTraffic(routes: RouteDefinition[]) {
 
   const calculateEstimatedTime = useCallback((route: RouteDefinition, trafficData: RouteTrafficData | null): number => {
     if (!trafficData) {
-      // Fallback: use base time with random variation
-      return route.baseTime + Math.floor(Math.random() * 5);
+      // Fallback: use base time with small random variation
+      return route.baseTime + Math.floor(Math.random() * 3);
     }
-
-    // SNSEV-inspired calculation:
-    // Time = BaseTime * CongestionPenalty / SpeedFactor
-    const { congestionPenalty, speedFactor } = trafficData.metrics;
-    
-    // Additional penalty for incidents
-    const incidentPenalty = trafficData.incidents.reduce((penalty, incident) => {
-      return penalty + (incident.delay / 60); // Convert delay seconds to minutes
-    }, 0);
 
     // Road closure means this route is effectively blocked
     if (trafficData.metrics.hasRoadClosure) {
-      return Infinity;
+      return 999; // Very high but not Infinity to avoid display issues
     }
 
-    const estimatedTime = Math.round(
-      (route.baseTime * congestionPenalty) / Math.max(speedFactor, 0.5) + incidentPenalty
+    // SNSEV-inspired calculation - simplified and bounded
+    // Use congestion to add a reasonable penalty (0-50% increase max)
+    const congestionMultiplier = 1 + (trafficData.metrics.avgDensity / 100) * 0.5;
+    
+    // Additional penalty for incidents (capped)
+    const incidentPenalty = Math.min(
+      trafficData.incidents.reduce((penalty, incident) => {
+        return penalty + Math.min((incident.delay || 0) / 60, 5); // Max 5 min per incident
+      }, 0),
+      10 // Total incident penalty capped at 10 min
     );
 
-    return Math.max(route.baseTime, estimatedTime); // Never less than base time
+    const estimatedTime = Math.round(route.baseTime * congestionMultiplier + incidentPenalty);
+
+    // Bound between base time and 3x base time
+    return Math.min(Math.max(route.baseTime, estimatedTime), route.baseTime * 3);
   }, []);
 
   const refreshTrafficData = useCallback(async () => {

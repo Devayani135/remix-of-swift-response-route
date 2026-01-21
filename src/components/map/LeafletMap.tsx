@@ -237,6 +237,11 @@ export function LeafletMap({
 
     // Add new incident markers
     allIncidents.forEach((incident) => {
+      // Safely get incident type as string
+      const incidentType = typeof incident.type === 'string' 
+        ? incident.type.toUpperCase() 
+        : String(incident.type || 'INCIDENT');
+      
       const incidentIcon = L.divIcon({
         className: "incident-marker",
         html: `<div style="position: relative;">
@@ -253,9 +258,9 @@ export function LeafletMap({
         .addTo(mapInstanceRef.current!)
         .bindPopup(`
           <div style="color: #ef4444;">
-            <b>⚠️ ${incident.type.toUpperCase()}</b><br>
-            ${incident.description}<br>
-            <small>Delay: ${Math.round(incident.delay / 60)} min</small>
+            <b>⚠️ ${incidentType}</b><br>
+            ${incident.description || 'Traffic incident reported'}<br>
+            <small>Delay: ${Math.round((incident.delay || 0) / 60)} min</small>
           </div>
         `);
 
