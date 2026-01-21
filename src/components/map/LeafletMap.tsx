@@ -95,7 +95,7 @@ export function LeafletMap({
   const {
     routesWithTraffic,
     fastestRoute,
-    allIncidents,
+    getIncidentsForRoute,
     isLoading,
     lastUpdate,
     error,
@@ -227,7 +227,9 @@ export function LeafletMap({
     };
   }, [onRouteChange, sourceLocation, userLocation]);
 
-  // Update incident markers when incidents change
+  // Update incident markers when incidents on active route change
+  const activeRouteIncidents = getIncidentsForRoute(activeRoute);
+  
   useEffect(() => {
     if (!mapInstanceRef.current) return;
 
@@ -235,8 +237,8 @@ export function LeafletMap({
     incidentMarkersRef.current.forEach(marker => marker.remove());
     incidentMarkersRef.current = [];
 
-    // Add new incident markers
-    allIncidents.forEach((incident) => {
+    // Only show incidents on the currently active route
+    activeRouteIncidents.forEach((incident) => {
       // Safely get incident type as string
       const incidentType = typeof incident.type === 'string' 
         ? incident.type.toUpperCase() 
@@ -266,7 +268,7 @@ export function LeafletMap({
 
       incidentMarkersRef.current.push(marker);
     });
-  }, [allIncidents]);
+  }, [activeRouteIncidents, activeRoute]);
 
   // Animate vehicle along route
   useEffect(() => {
@@ -407,10 +409,10 @@ export function LeafletMap({
               Updated: {lastUpdate.toLocaleTimeString()}
             </Badge>
           )}
-          {allIncidents.length > 0 && (
+          {activeRouteIncidents.length > 0 && (
             <Badge variant="outline" className="bg-destructive/10 backdrop-blur-sm border-destructive/30 text-destructive">
               <AlertTriangle className="mr-1 h-3 w-3" />
-              {allIncidents.length} Incident{allIncidents.length > 1 ? 's' : ''}
+              {activeRouteIncidents.length} Incident{activeRouteIncidents.length > 1 ? 's' : ''} on route
             </Badge>
           )}
         </div>

@@ -68,7 +68,7 @@ interface RouteWithTraffic extends RouteDefinition {
 export function useTomTomTraffic(routes: RouteDefinition[]) {
   const [routesWithTraffic, setRoutesWithTraffic] = useState<RouteWithTraffic[]>([]);
   const [fastestRoute, setFastestRoute] = useState<string>('');
-  const [allIncidents, setAllIncidents] = useState<TrafficIncident[]>([]);
+  const [incidentsByRoute, setIncidentsByRoute] = useState<Record<string, TrafficIncident[]>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -150,19 +150,17 @@ export function useTomTomTraffic(routes: RouteDefinition[]) {
       const sortedRoutes = [...updatedRoutes].sort((a, b) => a.estimatedTime - b.estimatedTime);
       const fastest = sortedRoutes[0];
 
-      // Collect all incidents from all routes
-      const incidents = trafficResults
-        .filter((data): data is RouteTrafficData => data !== null)
-        .flatMap(data => data.incidents);
-      
-      // Deduplicate incidents by id
-      const uniqueIncidents = incidents.filter(
-        (incident, index, self) => index === self.findIndex(i => i.id === incident.id)
-      );
+      // Map incidents by route key for route-specific display
+      const incidentsByRoute: Record<string, TrafficIncident[]> = {};
+      trafficResults.forEach(data => {
+        if (data) {
+          incidentsByRoute[data.routeKey] = data.incidents;
+        }
+      });
 
       setRoutesWithTraffic(sortedRoutes);
       setFastestRoute(fastest?.key || routes[0].key);
-      setAllIncidents(uniqueIncidents);
+      setIncidentsByRoute(incidentsByRoute);
       setLastUpdate(new Date());
 
       console.log(`Traffic updated: Fastest route = ${fastest?.name} (${fastest?.estimatedTime} min)`);
@@ -215,10 +213,16 @@ export function useTomTomTraffic(routes: RouteDefinition[]) {
     return null;
   }, [routesWithTraffic, fastestRoute]);
 
+  // Helper to get incidents for a specific route
+  const getIncidentsForRoute = useCallback((routeKey: string): TrafficIncident[] => {
+    return incidentsByRoute[routeKey] || [];
+  }, [incidentsByRoute]);
+
   return {
     routesWithTraffic,
     fastestRoute,
-    allIncidents,
+    incidentsByRoute,
+    getIncidentsForRoute,
     isLoading,
     lastUpdate,
     error,
