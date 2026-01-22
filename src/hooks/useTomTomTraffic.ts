@@ -18,7 +18,7 @@ interface TrafficSegment {
   freeFlowTravelTime: number;
 }
 
-interface TrafficIncident {
+export interface TrafficIncident {
   id: string;
   type: string;
   severity: number;
