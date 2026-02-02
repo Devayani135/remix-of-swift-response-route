@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/layout/Header";
 import { VehicleDispatchForm, type DispatchData } from "@/components/forms/VehicleDispatchForm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Ambulance, Clock, Route, MapPin, Navigation2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Ambulance, Clock, Route, MapPin, Navigation2, Database, GitBranch, Cpu } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 export default function Dispatch() {
@@ -25,7 +26,9 @@ export default function Dispatch() {
         state: { 
           dispatchData: data,
           source: data.source,
-          destination: data.destination
+          destination: data.destination,
+          sourceCoordinates: data.sourceCoordinates,
+          destinationCoordinates: data.destinationCoordinates,
         } 
       });
     }, 500);
@@ -41,12 +44,16 @@ export default function Dispatch() {
           <div className="text-center space-y-2">
             <h2 className="text-3xl font-bold tracking-tight">Emergency Vehicle Dispatch</h2>
             <p className="text-muted-foreground">
-              Register emergency vehicle and calculate optimal route
+              Visakhapatnam (Vizag) • Real-time Route Optimization
             </p>
+            <Badge variant="outline" className="bg-primary/10 border-primary/30">
+              <Database className="mr-1 h-3 w-3" />
+              OSM Dataset Loaded
+            </Badge>
           </div>
 
           {/* Info Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card className="border-border/50 bg-gradient-to-br from-primary/5 to-primary/10">
               <CardContent className="p-4 flex items-center gap-3">
                 <div className="p-2 rounded-full bg-primary/10">
@@ -54,7 +61,7 @@ export default function Dispatch() {
                 </div>
                 <div>
                   <p className="text-sm font-medium">Smart Routing</p>
-                  <p className="text-xs text-muted-foreground">Dijkstra & A* Algorithms</p>
+                  <p className="text-xs text-muted-foreground">Dijkstra & A* Visible</p>
                 </div>
               </CardContent>
             </Card>
@@ -66,7 +73,7 @@ export default function Dispatch() {
                 </div>
                 <div>
                   <p className="text-sm font-medium">Real-time Traffic</p>
-                  <p className="text-xs text-muted-foreground">TomTom API Integration</p>
+                  <p className="text-xs text-muted-foreground">TomTom API</p>
                 </div>
               </CardContent>
             </Card>
@@ -77,12 +84,49 @@ export default function Dispatch() {
                   <Navigation2 className="h-5 w-5 text-warning" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">Dynamic Rerouting</p>
-                  <p className="text-xs text-muted-foreground">Incident Detection</p>
+                  <p className="text-sm font-medium">Turn-by-Turn</p>
+                  <p className="text-xs text-muted-foreground">Live Navigation</p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/50 bg-gradient-to-br from-info/5 to-info/10">
+              <CardContent className="p-4 flex items-center gap-3">
+                <div className="p-2 rounded-full bg-info/10">
+                  <Cpu className="h-5 w-5 text-info" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium">Graph Processing</p>
+                  <p className="text-xs text-muted-foreground">90 Nodes</p>
                 </div>
               </CardContent>
             </Card>
           </div>
+
+          {/* Algorithm Info */}
+          <Card className="border-border/50 bg-gradient-to-r from-primary/5 via-background to-primary/5">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between flex-wrap gap-4">
+                <div className="flex items-center gap-3">
+                  <GitBranch className="h-5 w-5 text-primary" />
+                  <div>
+                    <p className="text-sm font-medium">Algorithm Selection</p>
+                    <p className="text-xs text-muted-foreground">
+                      <span className="text-success">Dijkstra</span> for initial route • <span className="text-warning">A*</span> for rerouting with incidents
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Badge variant="outline" className="bg-success/10 border-success/30 text-success">
+                    Dijkstra: O((V+E) log V)
+                  </Badge>
+                  <Badge variant="outline" className="bg-warning/10 border-warning/30 text-warning">
+                    A*: Heuristic Guided
+                  </Badge>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
           {/* Dispatch Form */}
           <div className="max-w-lg mx-auto">
@@ -94,7 +138,7 @@ export default function Dispatch() {
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-lg">
                 <MapPin className="h-5 w-5 text-info" />
-                Default Corridor
+                Vizag Road Network
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -104,8 +148,8 @@ export default function Dispatch() {
                     <MapPin className="h-4 w-4 text-success" />
                   </div>
                   <div>
-                    <p className="text-sm font-medium">Gachibowli</p>
-                    <p className="text-xs text-muted-foreground">Start Point</p>
+                    <p className="text-sm font-medium">Apollo Heart Hospital</p>
+                    <p className="text-xs text-muted-foreground">Default Start Point</p>
                   </div>
                 </div>
                 
@@ -113,8 +157,8 @@ export default function Dispatch() {
                 
                 <div className="flex items-center gap-3">
                   <div>
-                    <p className="text-sm font-medium text-right">LB Nagar</p>
-                    <p className="text-xs text-muted-foreground text-right">Destination</p>
+                    <p className="text-sm font-medium text-right">VIMS Hospital</p>
+                    <p className="text-xs text-muted-foreground text-right">Default Destination</p>
                   </div>
                   <div className="p-2 rounded-full bg-emergency/10">
                     <MapPin className="h-4 w-4 text-emergency" />
@@ -122,7 +166,7 @@ export default function Dispatch() {
                 </div>
               </div>
               <p className="text-xs text-muted-foreground text-center mt-3">
-                Multiple routes available: Via Mehdipatnam • Via Kukatpally • Via Outer Ring Road
+                90 locations from OSM data • Graph-based routing with live traffic integration
               </p>
             </CardContent>
           </Card>

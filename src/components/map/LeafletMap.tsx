@@ -9,62 +9,57 @@ import { toast } from "sonner";
 import { useTomTomTraffic } from "@/hooks/useTomTomTraffic";
 import { useLiveNavigation, type RoutePoint } from "@/hooks/useLiveNavigation";
 import { filterToMajorIncidents, getIncidentColor, getIncidentIcon, type FilteredIncident } from "@/utils/incidentFilter";
+import { VIZAG_CENTER } from "@/utils/vizagLocations";
+import type { DijkstraResult, AStarResult } from "@/utils/graphAlgorithms";
 
-// Default coordinates for Hyderabad route (Gachibowli to LB Nagar)
-const DEFAULT_SOURCE = { lat: 17.4400, lng: 78.3489 };
-const LB_NAGAR = { lat: 17.3457, lng: 78.5522 };
+// Default coordinates for Vizag
+const DEFAULT_SOURCE = { lat: 17.717130, lng: 83.309240 }; // Apollo Heart Hospital
+const DEFAULT_DEST = { lat: 17.759150, lng: 83.330054 }; // VIMS
 
-// Route definitions following SNSEV paper structure
+// Route definitions for Vizag
 const ROUTE_DEFINITIONS = [
   {
     key: "primary",
-    name: "Via Mehdipatnam",
+    name: "Via Beach Road",
     color: "#22c55e",
-    distance: 12.3,
-    baseTime: 8,
+    distance: 8.5,
+    baseTime: 15,
     coordinates: [
-      [17.4400, 78.3489], // Gachibowli
-      [17.4285, 78.3650], // Gachibowli Junction
-      [17.4150, 78.3820], // Tolichowki
-      [17.3950, 78.4150], // Mehdipatnam
-      [17.3850, 78.4450], // Attapur
-      [17.3700, 78.4800], // Dilsukhnagar
-      [17.3550, 78.5150], // Kothapet
-      [17.3457, 78.5522], // LB Nagar
+      [17.717130, 83.309240],
+      [17.711897, 83.302416],
+      [17.710594, 83.316826],
+      [17.721811, 83.335590],
+      [17.731683, 83.334045],
+      [17.759150, 83.330054],
     ] as [number, number][],
   },
   {
     key: "alternate1",
-    name: "Via Kukatpally",
+    name: "Via MVP Colony",
     color: "#3b82f6",
-    distance: 18.5,
-    baseTime: 14,
+    distance: 10.2,
+    baseTime: 18,
     coordinates: [
-      [17.4400, 78.3489], // Gachibowli
-      [17.4600, 78.3700], // Kondapur
-      [17.4850, 78.4100], // KPHB
-      [17.4950, 78.4500], // Kukatpally
-      [17.4800, 78.4900], // Moosapet
-      [17.4400, 78.5100], // Secunderabad area
-      [17.3900, 78.5300], // Malakpet
-      [17.3457, 78.5522], // LB Nagar
+      [17.717130, 83.309240],
+      [17.724754, 83.306172],
+      [17.737773, 83.304691],
+      [17.747849, 83.331857],
+      [17.759150, 83.330054],
     ] as [number, number][],
   },
   {
     key: "alternate2",
-    name: "Via Outer Ring Road",
+    name: "Via Seethamadara",
     color: "#f59e0b",
-    distance: 22.1,
-    baseTime: 16,
+    distance: 9.5,
+    baseTime: 17,
     coordinates: [
-      [17.4400, 78.3489], // Gachibowli
-      [17.4100, 78.3300], // Financial District
-      [17.3700, 78.3200], // Narsingi
-      [17.3200, 78.3600], // Shamshabad direction
-      [17.3000, 78.4200], // ORR South
-      [17.3100, 78.4800], // Chandrayangutta
-      [17.3300, 78.5200], // Sagar Ring Road
-      [17.3457, 78.5522], // LB Nagar
+      [17.717130, 83.309240],
+      [17.726716, 83.298984],
+      [17.736772, 83.307738],
+      [17.743332, 83.314369],
+      [17.761193, 83.317673],
+      [17.759150, 83.330054],
     ] as [number, number][],
   },
 ];
@@ -74,30 +69,42 @@ interface LeafletMapProps {
   activeRoute?: string;
   accidentDetected?: boolean;
   onRouteChange?: (route: string) => void;
+  sourceCoords?: { lat: number; lng: number };
+  destCoords?: { lat: number; lng: number };
+  sourceName?: string;
+  destName?: string;
+  calculatedRoute?: DijkstraResult | AStarResult | null;
 }
 
 export function LeafletMap({ 
   showAlternate = true, 
   activeRoute = "primary",
   accidentDetected = false,
-  onRouteChange
+  onRouteChange,
+  sourceCoords = DEFAULT_SOURCE,
+  destCoords = DEFAULT_DEST,
+  sourceName = "Start",
+  destName = "Destination",
+  calculatedRoute
 }: LeafletMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const vehicleMarkerRef = useRef<L.Marker | null>(null);
   const routeLayersRef = useRef<{ [key: string]: L.Polyline }>({});
   const liveRouteLayerRef = useRef<L.Polyline | null>(null);
+  const graphRouteLayerRef = useRef<L.Polyline | null>(null);
   const incidentMarkersRef = useRef<L.Marker[]>([]);
   const startMarkerRef = useRef<L.Marker | null>(null);
+  const endMarkerRef = useRef<L.Marker | null>(null);
   const [showAllRoutes, setShowAllRoutes] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isLocating, setIsLocating] = useState(false);
   const [majorIncidents, setMajorIncidents] = useState<FilteredIncident[]>([]);
 
   // Get current source location (user location or default)
-  const sourceLocation = userLocation || DEFAULT_SOURCE;
+  const sourceLocation = userLocation || sourceCoords;
 
-  // Use TomTom traffic data hook - SNSEV approach
+  // Use TomTom traffic data hook
   const {
     routesWithTraffic,
     fastestRoute,
@@ -109,7 +116,7 @@ export function LeafletMap({
     checkForBetterRoute,
   } = useTomTomTraffic(ROUTE_DEFINITIONS);
 
-  // Use live navigation hook for real-time vehicle tracking
+  // Use live navigation hook
   const {
     currentRoute: liveRoute,
     vehiclePosition,
@@ -120,7 +127,7 @@ export function LeafletMap({
     startNavigation,
     stopNavigation,
     refresh: refreshNavigation,
-  } = useLiveNavigation(sourceLocation, LB_NAGAR, onRouteChange);
+  } = useLiveNavigation(sourceLocation, destCoords, onRouteChange);
 
   // Filter incidents to major ones only
   useEffect(() => {
@@ -156,8 +163,8 @@ export function LeafletMap({
     if (!mapRef.current || mapInstanceRef.current) return;
 
     const map = L.map(mapRef.current, {
-      center: [17.39, 78.45],
-      zoom: 12,
+      center: [VIZAG_CENTER.lat, VIZAG_CENTER.lng],
+      zoom: 13,
       zoomControl: true,
       scrollWheelZoom: true,
     });
@@ -195,17 +202,18 @@ export function LeafletMap({
 
     const startMarker = L.marker([sourceLocation.lat, sourceLocation.lng], { icon: startIcon })
       .addTo(map)
-      .bindPopup(userLocation ? "<b>Your Location</b><br>Start Point" : "<b>Gachibowli</b><br>Start Point");
+      .bindPopup(`<b>${sourceName}</b><br>Start Point`);
     startMarkerRef.current = startMarker;
 
-    L.marker([LB_NAGAR.lat, LB_NAGAR.lng], { icon: endIcon })
+    const endMarker = L.marker([destCoords.lat, destCoords.lng], { icon: endIcon })
       .addTo(map)
-      .bindPopup("<b>LB Nagar</b><br>Destination");
+      .bindPopup(`<b>${destName}</b><br>Destination`);
+    endMarkerRef.current = endMarker;
 
-    // Draw routes with Google Maps-like styling (thick, rounded, smooth)
+    // Draw routes with Google Maps-like styling
     ROUTE_DEFINITIONS.forEach((route) => {
       // Create shadow/outline layer for depth
-      const shadowPolyline = L.polyline(route.coordinates, {
+      L.polyline(route.coordinates, {
         color: '#000000',
         weight: route.key === "primary" ? 10 : 7,
         opacity: 0.3,
@@ -213,7 +221,7 @@ export function LeafletMap({
         lineJoin: 'round',
       }).addTo(map);
 
-      // Main route polyline with smooth styling
+      // Main route polyline
       const polyline = L.polyline(route.coordinates, {
         color: route.color,
         weight: route.key === "primary" ? 7 : 5,
@@ -253,17 +261,96 @@ export function LeafletMap({
     const vehicleMarker = L.marker([sourceLocation.lat, sourceLocation.lng], { icon: vehicleIcon }).addTo(map);
     vehicleMarkerRef.current = vehicleMarker;
 
+    // Fit bounds to show both markers
+    const bounds = L.latLngBounds([
+      [sourceLocation.lat, sourceLocation.lng],
+      [destCoords.lat, destCoords.lng]
+    ]);
+    map.fitBounds(bounds, { padding: [50, 50] });
+
     return () => {
       map.remove();
       mapInstanceRef.current = null;
     };
-  }, [onRouteChange, sourceLocation, userLocation]);
+  }, [sourceCoords, destCoords, sourceName, destName]);
+
+  // Update markers when coordinates change
+  useEffect(() => {
+    if (startMarkerRef.current) {
+      startMarkerRef.current.setLatLng([sourceLocation.lat, sourceLocation.lng]);
+    }
+    if (endMarkerRef.current) {
+      endMarkerRef.current.setLatLng([destCoords.lat, destCoords.lng]);
+    }
+    if (mapInstanceRef.current) {
+      const bounds = L.latLngBounds([
+        [sourceLocation.lat, sourceLocation.lng],
+        [destCoords.lat, destCoords.lng]
+      ]);
+      mapInstanceRef.current.fitBounds(bounds, { padding: [50, 50] });
+    }
+  }, [sourceLocation, destCoords]);
 
   // Update vehicle position from live navigation
   useEffect(() => {
     if (!vehicleMarkerRef.current || !vehiclePosition) return;
     vehicleMarkerRef.current.setLatLng([vehiclePosition.lat, vehiclePosition.lng]);
   }, [vehiclePosition]);
+
+  // Draw graph-calculated route when available
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+
+    // Remove previous graph route
+    if (graphRouteLayerRef.current) {
+      graphRouteLayerRef.current.remove();
+      graphRouteLayerRef.current = null;
+    }
+
+    // Draw graph-calculated route if available
+    if (calculatedRoute && calculatedRoute.pathNodes.length > 1) {
+      const coords: [number, number][] = calculatedRoute.pathNodes.map(node => [node.lat, node.lng]);
+      
+      // Shadow layer
+      L.polyline(coords, {
+        color: '#000000',
+        weight: 14,
+        opacity: 0.25,
+        lineCap: 'round',
+        lineJoin: 'round',
+      }).addTo(mapInstanceRef.current);
+
+      // Main route with different color for A*
+      const routeColor = calculatedRoute.algorithm === 'astar' ? '#f59e0b' : '#22c55e';
+      
+      const graphRoutePolyline = L.polyline(coords, {
+        color: routeColor,
+        weight: 10,
+        opacity: 1,
+        lineCap: 'round',
+        lineJoin: 'round',
+      }).addTo(mapInstanceRef.current);
+
+      graphRouteLayerRef.current = graphRoutePolyline;
+      graphRoutePolyline.bringToFront();
+
+      // Add waypoint markers
+      calculatedRoute.pathNodes.forEach((node, index) => {
+        if (index === 0 || index === calculatedRoute.pathNodes.length - 1) return;
+        
+        const waypointIcon = L.divIcon({
+          className: "waypoint-marker",
+          html: `<div style="background: ${routeColor}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
+          iconSize: [12, 12],
+          iconAnchor: [6, 6],
+        });
+
+        L.marker([node.lat, node.lng], { icon: waypointIcon })
+          .addTo(mapInstanceRef.current!)
+          .bindPopup(`<b>${node.name}</b><br>Waypoint #${index}`);
+      });
+    }
+  }, [calculatedRoute]);
 
   // Draw live route from TomTom when available
   useEffect(() => {
@@ -275,8 +362,8 @@ export function LeafletMap({
       liveRouteLayerRef.current = null;
     }
 
-    // Draw live calculated route if available
-    if (liveRoute && liveRoute.coordinates.length > 1) {
+    // Draw live calculated route if available (and no graph route)
+    if (liveRoute && liveRoute.coordinates.length > 1 && !calculatedRoute) {
       const coords: [number, number][] = liveRoute.coordinates.map(c => [c.lat, c.lng]);
       
       // Shadow layer
@@ -300,9 +387,9 @@ export function LeafletMap({
       liveRouteLayerRef.current = liveRoutePolyline;
       liveRoutePolyline.bringToFront();
     }
-  }, [liveRoute]);
+  }, [liveRoute, calculatedRoute]);
 
-  // Update incident markers - only major incidents
+  // Update incident markers
   useEffect(() => {
     if (!mapInstanceRef.current) return;
 
@@ -310,7 +397,7 @@ export function LeafletMap({
     incidentMarkersRef.current.forEach(marker => marker.remove());
     incidentMarkersRef.current = [];
 
-    // Only show major incidents (accidents, road work, heavy traffic)
+    // Only show major incidents
     majorIncidents.forEach((incident) => {
       const color = getIncidentColor(incident.type);
       const icon = getIncidentIcon(incident.type);
@@ -343,14 +430,13 @@ export function LeafletMap({
 
   // Animate vehicle along predefined route when not using live navigation
   useEffect(() => {
-    if (liveRoute) return; // Skip if using live navigation
+    if (liveRoute || calculatedRoute) return; // Skip if using live navigation or graph route
 
     const route = ROUTE_DEFINITIONS.find(r => r.key === activeRoute);
     if (!route || !vehicleMarkerRef.current) return;
 
     const coords = route.coordinates;
     let progress = 0;
-    let lastRerouteCheck = 0;
     
     const animate = () => {
       progress = (progress + 0.2) % 100;
@@ -364,46 +450,12 @@ export function LeafletMap({
         const lat = start[0] + (end[0] - start[0]) * segProgress;
         const lng = start[1] + (end[1] - start[1]) * segProgress;
         vehicleMarkerRef.current?.setLatLng([lat, lng]);
-        
-        // Check for incidents ahead every 10% progress
-        if (Math.floor(progress / 10) > Math.floor(lastRerouteCheck / 10)) {
-          lastRerouteCheck = progress;
-          
-          // Check if major incident is ahead
-          if (majorIncidents.length > 0 && fastestRoute && fastestRoute !== activeRoute) {
-            const incidentAhead = majorIncidents.some(incident => {
-              for (let i = segment + 1; i < coords.length; i++) {
-                const coord = coords[i];
-                const distance = Math.sqrt(
-                  Math.pow(coord[0] - incident.location.lat, 2) + 
-                  Math.pow(coord[1] - incident.location.lng, 2)
-                );
-                if (distance < 0.015) return true;
-              }
-              return false;
-            });
-            
-            if (incidentAhead) {
-              const incidentType = majorIncidents[0].type.replace(/_/g, ' ').toLowerCase();
-              toast.warning(
-                `⚠️ ${incidentType} detected ahead! Rerouting...`,
-                { 
-                  duration: 5000,
-                  action: {
-                    label: "Switch Route",
-                    onClick: () => onRouteChange?.(fastestRoute)
-                  }
-                }
-              );
-            }
-          }
-        }
       }
     };
 
     const interval = setInterval(animate, 100);
     return () => clearInterval(interval);
-  }, [activeRoute, fastestRoute, majorIncidents, liveRoute, onRouteChange]);
+  }, [activeRoute, liveRoute, calculatedRoute]);
 
   // Update route styling
   useEffect(() => {
@@ -411,7 +463,7 @@ export function LeafletMap({
       const routeData = routesWithTraffic.find(r => r.key === key);
       const routeDef = ROUTE_DEFINITIONS.find(r => r.key === key);
       
-      if (key === activeRoute) {
+      if (key === activeRoute && !calculatedRoute) {
         polyline.setStyle({ 
           weight: 7, 
           opacity: 1, 
@@ -436,10 +488,10 @@ export function LeafletMap({
       } else if (showAllRoutes) {
         polyline.setStyle({ weight: 5, opacity: 0.5, dashArray: "12, 8" });
       } else {
-        polyline.setStyle({ opacity: 0 });
+        polyline.setStyle({ opacity: calculatedRoute ? 0.2 : 0 });
       }
     });
-  }, [activeRoute, showAllRoutes, routesWithTraffic]);
+  }, [activeRoute, showAllRoutes, routesWithTraffic, calculatedRoute]);
 
   // Handle manual reroute
   const handleReroute = useCallback(() => {
@@ -500,8 +552,8 @@ export function LeafletMap({
 
   // Handle download OSM data
   const handleDownloadOSM = useCallback(() => {
-    window.open('/data/hyderabad-road-network.csv', '_blank');
-    toast.success("Downloading Hyderabad road network data...");
+    window.open('/data/vizag-road-network.csv', '_blank');
+    toast.success("Downloading Vizag road network data...");
   }, []);
 
   // Get active route data
@@ -546,10 +598,10 @@ export function LeafletMap({
               {majorIncidents.length} Alert{majorIncidents.length > 1 ? 's' : ''} on route
             </Badge>
           )}
-          {liveRoute && (
-            <Badge variant="outline" className="bg-success/10 backdrop-blur-sm border-success/30 text-success">
+          {calculatedRoute && (
+            <Badge variant="outline" className={`backdrop-blur-sm ${calculatedRoute.algorithm === 'astar' ? 'bg-warning/10 border-warning/30 text-warning' : 'bg-success/10 border-success/30 text-success'}`}>
               <Route className="mr-1 h-3 w-3" />
-              {liveRoute.algorithm === 'astar' ? 'A*' : 'Dijkstra'} | {liveRoute.distance} km
+              {calculatedRoute.algorithm.toUpperCase()} | {calculatedRoute.totalDistance.toFixed(1)} km
             </Badge>
           )}
         </div>
@@ -641,12 +693,12 @@ export function LeafletMap({
         </div>
       )}
 
-      {/* Route Legend - All routes sorted by time */}
+      {/* Route Legend */}
       {showAllRoutes && (
         <div className="absolute bottom-4 left-4 z-[1000] pointer-events-auto">
           <Card className="bg-background/95 backdrop-blur-sm border-border/50 p-3 max-w-xs">
             <p className="text-xs font-semibold mb-2 text-muted-foreground">
-              Routes by Shortest Time (SNSEV)
+              Routes by Shortest Time (Vizag)
             </p>
             <div className="space-y-1.5">
               {routesWithTraffic.map((route, index) => {
@@ -698,21 +750,25 @@ export function LeafletMap({
             <div className="flex items-center gap-3">
               <div
                 className="h-4 w-4 rounded-full flex-shrink-0"
-                style={{ backgroundColor: ROUTE_DEFINITIONS.find(r => r.key === activeRoute)?.color }}
+                style={{ backgroundColor: calculatedRoute?.algorithm === 'astar' ? '#f59e0b' : '#22c55e' }}
               />
               <div>
                 <p className="text-xs text-muted-foreground">Active Route</p>
                 <p className="text-sm font-semibold">
-                  {ROUTE_DEFINITIONS.find(r => r.key === activeRoute)?.name}
+                  {calculatedRoute ? `${sourceName} → ${destName}` : ROUTE_DEFINITIONS.find(r => r.key === activeRoute)?.name}
                 </p>
                 <div className="flex items-center gap-2 mt-1">
-                  {activeRouteData && (
+                  {calculatedRoute ? (
+                    <span className="text-xs text-success">
+                      {calculatedRoute.totalDistance.toFixed(1)} km • {Math.round(calculatedRoute.totalTime)} min
+                    </span>
+                  ) : activeRouteData && (
                     <span className={`text-xs ${activeRouteData.congestion >= 60 ? 'text-destructive' : activeRouteData.congestion >= 30 ? 'text-warning' : 'text-success'}`}>
                       {activeRouteData.congestion}% congestion
                     </span>
                   )}
                   <Badge variant="outline" className="text-[9px] px-1.5 py-0 bg-primary/10 border-primary/30">
-                    {liveRoute?.algorithm === 'astar' ? 'A*' : activeRoute === 'primary' ? 'Dijkstra' : 'A*'}
+                    {calculatedRoute?.algorithm === 'astar' ? 'A*' : 'Dijkstra'}
                   </Badge>
                 </div>
               </div>
@@ -731,7 +787,7 @@ export function LeafletMap({
             <div>
               <p className="text-xs text-muted-foreground">Estimated Arrival</p>
               <p className="text-lg font-bold font-mono text-success">
-                {liveRoute?.estimatedTime || activeRouteData?.estimatedTime || ROUTE_DEFINITIONS.find(r => r.key === activeRoute)?.baseTime || '--'} min
+                {calculatedRoute ? Math.round(calculatedRoute.totalTime) : liveRoute?.estimatedTime || activeRouteData?.estimatedTime || ROUTE_DEFINITIONS.find(r => r.key === activeRoute)?.baseTime || '--'} min
               </p>
               <div className="flex items-center gap-2 mt-1">
                 <div className="w-20 h-1.5 bg-muted rounded-full overflow-hidden">

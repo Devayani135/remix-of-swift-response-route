@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useLocation } from "react-router-dom";
 import { 
   AlertTriangle, 
@@ -8,72 +8,69 @@ import {
   Zap,
   Ambulance,
   Clock,
-  Route
+  Route,
+  GitBranch,
+  Cpu
 } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { TrafficDensityBar } from "@/components/dashboard/TrafficDensityBar";
-import { AlertCard } from "@/components/dashboard/AlertCard";
 import { LeafletMap } from "@/components/map/LeafletMap";
 import { RouteComparison } from "@/components/dashboard/RouteComparison";
+import { TurnByTurnPanel } from "@/components/navigation/TurnByTurnPanel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useTrafficData } from "@/hooks/useTrafficData";
 import { useTomTomTraffic, type TrafficIncident } from "@/hooks/useTomTomTraffic";
 import { useToast } from "@/hooks/use-toast";
+import { findOptimalRoute, getVizagGraph, type DijkstraResult, type AStarResult } from "@/utils/graphAlgorithms";
+import { VIZAG_CENTER, DEFAULT_SOURCE_VIZAG, DEFAULT_DESTINATION_VIZAG } from "@/utils/vizagLocations";
 import type { DispatchData } from "@/components/forms/VehicleDispatchForm";
 
-// Route definitions for TomTom traffic
+// Vizag route definitions for TomTom traffic
 const ROUTE_DEFINITIONS = [
   {
     key: "primary",
-    name: "Via Mehdipatnam",
+    name: "Via Beach Road",
     color: "#22c55e",
-    distance: 12.3,
-    baseTime: 8,
+    distance: 8.5,
+    baseTime: 15,
     coordinates: [
-      [17.4400, 78.3489],
-      [17.4285, 78.3650],
-      [17.4150, 78.3820],
-      [17.3950, 78.4150],
-      [17.3850, 78.4450],
-      [17.3700, 78.4800],
-      [17.3550, 78.5150],
-      [17.3457, 78.5522],
+      [17.717130, 83.309240], // Apollo Heart Hospital
+      [17.711897, 83.302416], // Jagadamba Center
+      [17.710594, 83.316826], // RK Beach
+      [17.721811, 83.335590], // VUDA Park
+      [17.731683, 83.334045], // Pedda Waltair
+      [17.759150, 83.330054], // VIMS
     ] as [number, number][],
   },
   {
     key: "alternate1",
-    name: "Via Kukatpally",
+    name: "Via MVP Colony",
     color: "#3b82f6",
-    distance: 18.5,
-    baseTime: 14,
+    distance: 10.2,
+    baseTime: 18,
     coordinates: [
-      [17.4400, 78.3489],
-      [17.4600, 78.3700],
-      [17.4850, 78.4100],
-      [17.4950, 78.4500],
-      [17.4800, 78.4900],
-      [17.4400, 78.5100],
-      [17.3900, 78.5300],
-      [17.3457, 78.5522],
+      [17.717130, 83.309240], // Apollo Heart Hospital
+      [17.724754, 83.306172], // Asilmetta Junction
+      [17.737773, 83.304691], // 4th Town Junction
+      [17.747849, 83.331857], // Medicover MVP
+      [17.759150, 83.330054], // VIMS
     ] as [number, number][],
   },
   {
     key: "alternate2",
-    name: "Via Outer Ring Road",
+    name: "Via Seethamadara",
     color: "#f59e0b",
-    distance: 22.1,
-    baseTime: 16,
+    distance: 9.5,
+    baseTime: 17,
     coordinates: [
-      [17.4400, 78.3489],
-      [17.4100, 78.3300],
-      [17.3700, 78.3200],
-      [17.3200, 78.3600],
-      [17.3000, 78.4200],
-      [17.3100, 78.4800],
-      [17.3300, 78.5200],
-      [17.3457, 78.5522],
+      [17.717130, 83.309240], // Apollo Heart Hospital
+      [17.726716, 83.298984], // Kalavathi Surgical Hospital
+      [17.736772, 83.307738], // Gurudwara Junction
+      [17.743332, 83.314369], // Seethamadara
+      [17.761193, 83.317673], // Apollo Arilova
+      [17.759150, 83.330054], // VIMS
     ] as [number, number][],
   },
 ];
@@ -84,9 +81,16 @@ export default function Map() {
   const { toast } = useToast();
   
   const dispatchData = location.state?.dispatchData as DispatchData | undefined;
+  const sourceCoords = location.state?.sourceCoordinates || { lat: DEFAULT_SOURCE_VIZAG.lat, lng: DEFAULT_SOURCE_VIZAG.lng };
+  const destCoords = location.state?.destinationCoordinates || { lat: DEFAULT_DESTINATION_VIZAG.lat, lng: DEFAULT_DESTINATION_VIZAG.lng };
+  const sourceName = dispatchData?.source || DEFAULT_SOURCE_VIZAG.name;
+  const destName = dispatchData?.destination || DEFAULT_DESTINATION_VIZAG.name;
   
   const [selectedRoute, setSelectedRoute] = useState<string>("primary");
   const [accidentDetected, setAccidentDetected] = useState(false);
+  const [calculatedRoute, setCalculatedRoute] = useState<DijkstraResult | AStarResult | null>(null);
+  const [currentNodeIndex, setCurrentNodeIndex] = useState(0);
+  const [isCalculating, setIsCalculating] = useState(false);
 
   // Use TomTom traffic hook
   const {
@@ -94,6 +98,58 @@ export default function Map() {
     getIncidentsForRoute,
     isLoading,
   } = useTomTomTraffic(ROUTE_DEFINITIONS);
+
+  // Calculate route using graph algorithms
+  useEffect(() => {
+    const calculateGraphRoute = async () => {
+      setIsCalculating(true);
+      
+      console.log('=== ROUTE CALCULATION REQUEST ===');
+      console.log(`Source: ${sourceName}`);
+      console.log(`Destination: ${destName}`);
+      
+      // Initialize the graph
+      const graph = getVizagGraph();
+      console.log(`Graph loaded: ${graph.nodes.size} nodes`);
+      
+      // Find optimal route using Dijkstra (no incidents) or A* (with incidents)
+      const result = findOptimalRoute(sourceName, destName, []);
+      
+      if (result) {
+        setCalculatedRoute(result);
+        toast({
+          title: `Route Calculated (${result.algorithm.toUpperCase()})`,
+          description: `${result.totalDistance.toFixed(1)} km, ${Math.round(result.totalTime)} min, ${result.nodesVisited} nodes visited`,
+        });
+      } else {
+        console.log('No route found, using TomTom fallback');
+        toast({
+          title: "Using TomTom Route",
+          description: "Graph route not available, using TomTom API",
+        });
+      }
+      
+      setIsCalculating(false);
+    };
+    
+    calculateGraphRoute();
+  }, [sourceName, destName, toast]);
+
+  // Simulate vehicle progress
+  useEffect(() => {
+    if (!calculatedRoute || calculatedRoute.pathNodes.length < 2) return;
+    
+    const interval = setInterval(() => {
+      setCurrentNodeIndex(prev => {
+        if (prev >= calculatedRoute.pathNodes.length - 1) {
+          return 0; // Loop back
+        }
+        return prev + 1;
+      });
+    }, 3000); // Move every 3 seconds
+    
+    return () => clearInterval(interval);
+  }, [calculatedRoute]);
 
   // Get incidents for active route - these come from TomTom API
   const activeRouteIncidents = getIncidentsForRoute(selectedRoute);
@@ -110,21 +166,37 @@ export default function Map() {
         setAccidentDetected(true);
         toast({
           title: "⚠️ Incident Detected on Route!",
-          description: "TomTom detected traffic incident. Consider alternate route.",
+          description: "TomTom detected traffic incident. Triggering A* reroute...",
           variant: "destructive",
         });
+        
+        // Recalculate with A* avoiding incident
+        if (activeRouteIncidents[0]?.from) {
+          const result = findOptimalRoute(
+            sourceName, 
+            destName, 
+            [{ lat: activeRouteIncidents[0].from.lat, lng: activeRouteIncidents[0].from.lng }]
+          );
+          if (result) {
+            setCalculatedRoute(result);
+            toast({
+              title: `Rerouted using ${result.algorithm.toUpperCase()}`,
+              description: `New route: ${result.totalDistance.toFixed(1)} km, ${Math.round(result.totalTime)} min`,
+            });
+          }
+        }
       }
     }, 20000);
 
     return () => clearTimeout(timer);
-  }, [toast, activeRouteIncidents.length]);
+  }, [toast, activeRouteIncidents, sourceName, destName]);
 
   // Show dispatch info on mount
   useEffect(() => {
     if (dispatchData) {
       toast({
         title: "Route Calculation Started",
-        description: `Calculating optimal route for ${dispatchData.vehicleId}`,
+        description: `Calculating optimal route for ${dispatchData.vehicleId} using Dijkstra/A*`,
       });
     }
   }, [dispatchData, toast]);
@@ -136,23 +208,33 @@ export default function Map() {
       <main className="p-6">
         <div className="max-w-[1800px] mx-auto space-y-6">
           {/* Page Title */}
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h2 className="text-2xl font-bold tracking-tight">Live Route Monitoring</h2>
               <p className="text-muted-foreground">
-                Real-time traffic analysis • {dispatchData ? `${dispatchData.source} ↔ ${dispatchData.destination}` : 'Gachibowli ↔ LB Nagar Corridor'}
+                Visakhapatnam • {sourceName} ↔ {destName}
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               {dispatchData && (
                 <Badge variant="outline" className="bg-emergency/10 border-emergency/20 text-emergency">
                   <Ambulance className="mr-1 h-3 w-3" />
                   {dispatchData.vehicleId} Active
                 </Badge>
               )}
+              <Badge variant="outline" className="bg-primary/10 border-primary/30">
+                <Cpu className="mr-1 h-3 w-3" />
+                Graph: {getVizagGraph().nodes.size} nodes
+              </Badge>
+              {calculatedRoute && (
+                <Badge variant="outline" className={`${calculatedRoute.algorithm === 'astar' ? 'bg-warning/10 border-warning/30 text-warning' : 'bg-success/10 border-success/30 text-success'}`}>
+                  <GitBranch className="mr-1 h-3 w-3" />
+                  {calculatedRoute.algorithm.toUpperCase()} | {calculatedRoute.nodesVisited} nodes visited
+                </Badge>
+              )}
               <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/10 border border-primary/20">
                 <Zap className="h-4 w-4 text-primary" />
-                <span className="text-sm font-medium">AI Routing Active</span>
+                <span className="text-sm font-medium">SNSEV Routing Active</span>
               </div>
             </div>
           </div>
@@ -168,16 +250,16 @@ export default function Map() {
             />
             <StatCard
               title="Est. Response Time"
-              value={`${routesWithTraffic.find(r => r.key === selectedRoute)?.estimatedTime || 8}m`}
-              subtitle="Based on live traffic"
+              value={`${calculatedRoute?.totalTime ? Math.round(calculatedRoute.totalTime) : routesWithTraffic.find(r => r.key === selectedRoute)?.estimatedTime || 15}m`}
+              subtitle="Based on graph calculation"
               icon={Clock}
               variant="success"
             />
             <StatCard
               title="Route Algorithm"
-              value={selectedRoute === 'primary' ? 'Dijkstra' : 'A*'}
-              subtitle="Time-based cost function"
-              icon={Route}
+              value={calculatedRoute?.algorithm === 'astar' ? 'A*' : 'Dijkstra'}
+              subtitle={`${calculatedRoute?.executionTimeMs?.toFixed(2) || 0}ms execution`}
+              icon={GitBranch}
               variant="info"
             />
             <StatCard
@@ -198,7 +280,7 @@ export default function Map() {
                 <CardHeader className="pb-2">
                   <CardTitle className="flex items-center gap-2">
                     <MapPin className="h-5 w-5 text-primary" />
-                    Live Route Visualization
+                    Live Route Visualization (Vizag OSM)
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0">
@@ -208,6 +290,11 @@ export default function Map() {
                       activeRoute={selectedRoute as "primary" | "alternate1" | "alternate2"}
                       accidentDetected={accidentDetected}
                       onRouteChange={setSelectedRoute}
+                      sourceCoords={sourceCoords}
+                      destCoords={destCoords}
+                      sourceName={sourceName}
+                      destName={destName}
+                      calculatedRoute={calculatedRoute}
                     />
                   </div>
                 </CardContent>
@@ -219,7 +306,7 @@ export default function Map() {
                   <div className="flex items-center justify-between">
                     <CardTitle className="flex items-center gap-2">
                       <Gauge className="h-5 w-5 text-warning" />
-                      Traffic Density Analysis
+                      Traffic Density Analysis (Vizag)
                     </CardTitle>
                     <div className="flex items-center gap-2">
                       <Activity className="h-4 w-4 text-muted-foreground animate-pulse" />
@@ -247,8 +334,17 @@ export default function Map() {
               </Card>
             </div>
 
-            {/* Right Column - Route Info & Alerts */}
+            {/* Right Column - Navigation & Alerts */}
             <div className="space-y-6">
+              {/* Turn-by-Turn Navigation Panel */}
+              <TurnByTurnPanel
+                pathNodes={calculatedRoute?.pathNodes || []}
+                currentNodeIndex={currentNodeIndex}
+                totalDistance={calculatedRoute?.totalDistance || 0}
+                totalTime={calculatedRoute?.totalTime || 0}
+                algorithm={calculatedRoute?.algorithm || 'dijkstra'}
+              />
+
               {/* Route Comparison */}
               <RouteComparison
                 routes={routesWithTraffic.map(route => ({
@@ -278,7 +374,7 @@ export default function Map() {
                     )}
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-3 max-h-[400px] overflow-y-auto">
+                <CardContent className="space-y-3 max-h-[300px] overflow-y-auto">
                   {activeRouteIncidents.length === 0 ? (
                     <div className="text-center py-8">
                       <div className="p-3 rounded-full bg-success/10 w-fit mx-auto mb-3">

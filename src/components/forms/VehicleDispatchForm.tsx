@@ -1,10 +1,12 @@
 import { useState } from "react";
-import { Car, Truck, Ambulance, Flame, ShieldAlert, MapPin, Navigation2, Send } from "lucide-react";
+import { Car, Truck, Ambulance, Flame, ShieldAlert, Navigation2, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { LocationSelector } from "./LocationSelector";
 import { cn } from "@/lib/utils";
+import { DEFAULT_SOURCE_VIZAG, DEFAULT_DESTINATION_VIZAG } from "@/utils/vizagLocations";
 
 type VehicleType = "ambulance" | "fire" | "police" | "rescue";
 
@@ -32,6 +34,8 @@ export interface DispatchData {
   driverName: string;
   source: string;
   destination: string;
+  sourceCoordinates: { lat: number; lng: number };
+  destinationCoordinates: { lat: number; lng: number };
   priority: "normal" | "urgent" | "critical";
 }
 
@@ -42,12 +46,16 @@ export function VehicleDispatchForm({ onDispatch }: VehicleDispatchFormProps) {
     driverName: string;
     source: string;
     destination: string;
+    sourceCoordinates: { lat: number; lng: number };
+    destinationCoordinates: { lat: number; lng: number };
     priority: "normal" | "urgent" | "critical";
   }>({
     vehicleId: "",
     driverName: "",
-    source: "Gachibowli",
-    destination: "LB Nagar",
+    source: DEFAULT_SOURCE_VIZAG.name,
+    destination: DEFAULT_DESTINATION_VIZAG.name,
+    sourceCoordinates: { lat: DEFAULT_SOURCE_VIZAG.lat, lng: DEFAULT_SOURCE_VIZAG.lng },
+    destinationCoordinates: { lat: DEFAULT_DESTINATION_VIZAG.lat, lng: DEFAULT_DESTINATION_VIZAG.lng },
     priority: "urgent",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -67,6 +75,22 @@ export function VehicleDispatchForm({ onDispatch }: VehicleDispatchFormProps) {
     setIsSubmitting(false);
   };
 
+  const handleSourceChange = (name: string, coordinates: { lat: number; lng: number }) => {
+    setFormData(prev => ({
+      ...prev,
+      source: name,
+      sourceCoordinates: coordinates,
+    }));
+  };
+
+  const handleDestinationChange = (name: string, coordinates: { lat: number; lng: number }) => {
+    setFormData(prev => ({
+      ...prev,
+      destination: name,
+      destinationCoordinates: coordinates,
+    }));
+  };
+
   return (
     <Card className="border-border/50 card-hover">
       <CardHeader className="pb-4">
@@ -75,7 +99,7 @@ export function VehicleDispatchForm({ onDispatch }: VehicleDispatchFormProps) {
           Vehicle Dispatch
         </CardTitle>
         <CardDescription>
-          Register emergency vehicle and request optimal route
+          Register emergency vehicle and request optimal route in Visakhapatnam
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -109,7 +133,7 @@ export function VehicleDispatchForm({ onDispatch }: VehicleDispatchFormProps) {
               <Label htmlFor="vehicleId">Vehicle ID</Label>
               <Input
                 id="vehicleId"
-                placeholder="TS-01-1234"
+                placeholder="AP-31-1234"
                 value={formData.vehicleId}
                 onChange={(e) => setFormData(prev => ({ ...prev, vehicleId: e.target.value }))}
                 className="bg-secondary/30"
@@ -127,32 +151,35 @@ export function VehicleDispatchForm({ onDispatch }: VehicleDispatchFormProps) {
             </div>
           </div>
 
-          {/* Route Selection */}
+          {/* Route Selection with Location Dropdowns */}
           <div className="space-y-3">
-            <Label>Route</Label>
+            <Label>Route (Select from Vizag OSM Data)</Label>
             <div className="flex items-center gap-2">
-              <div className="relative flex-1">
-                <MapPin className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-success" />
-                <Input
+              <div className="flex-1">
+                <LocationSelector
                   value={formData.source}
-                  onChange={(e) => setFormData(prev => ({ ...prev, source: e.target.value }))}
-                  className="bg-secondary/30 pl-9"
-                  placeholder="Source"
+                  onChange={handleSourceChange}
+                  placeholder="Select source..."
+                  variant="source"
+                  excludeLocation={formData.destination}
                 />
               </div>
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 border border-primary/20">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 border border-primary/20 flex-shrink-0">
                 <Navigation2 className="h-4 w-4 text-primary" />
               </div>
-              <div className="relative flex-1">
-                <MapPin className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-emergency" />
-                <Input
+              <div className="flex-1">
+                <LocationSelector
                   value={formData.destination}
-                  onChange={(e) => setFormData(prev => ({ ...prev, destination: e.target.value }))}
-                  className="bg-secondary/30 pl-9"
-                  placeholder="Destination"
+                  onChange={handleDestinationChange}
+                  placeholder="Select destination..."
+                  variant="destination"
+                  excludeLocation={formData.source}
                 />
               </div>
             </div>
+            <p className="text-xs text-muted-foreground">
+              📍 {formData.sourceCoordinates.lat.toFixed(4)}, {formData.sourceCoordinates.lng.toFixed(4)} → {formData.destinationCoordinates.lat.toFixed(4)}, {formData.destinationCoordinates.lng.toFixed(4)}
+            </p>
           </div>
 
           {/* Priority Selection */}
@@ -196,7 +223,7 @@ export function VehicleDispatchForm({ onDispatch }: VehicleDispatchFormProps) {
             {isSubmitting ? (
               <>
                 <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                Computing Route...
+                Computing Route (Dijkstra/A*)...
               </>
             ) : (
               <>
