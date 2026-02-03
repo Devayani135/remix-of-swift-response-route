@@ -7,12 +7,13 @@ interface TrafficSegment {
   density: number;
 }
 
+// Vizag road segments for traffic density analysis
 const initialSegments: TrafficSegment[] = [
-  { id: "seg-1", name: "Gachibowli - Tolichowki", location: "Outer Ring Road", density: 35 },
-  { id: "seg-2", name: "Tolichowki - Mehdipatnam", location: "Mehdipatnam Road", density: 62 },
-  { id: "seg-3", name: "Mehdipatnam - Dilsukhnagar", location: "NH65", density: 78 },
-  { id: "seg-4", name: "Dilsukhnagar - Kothapet", location: "Inner Ring Road", density: 45 },
-  { id: "seg-5", name: "Kothapet - LB Nagar", location: "LB Nagar Road", density: 28 },
+  { id: "seg-1", name: "RK Beach - Jagadamba", location: "Beach Road", density: 42 },
+  { id: "seg-2", name: "Jagadamba - Dwaraka Nagar", location: "Main Road", density: 58 },
+  { id: "seg-3", name: "MVP Colony - Maddilapalem", location: "MVP Road", density: 35 },
+  { id: "seg-4", name: "Seethamadara - NAD Junction", location: "NAD Road", density: 72 },
+  { id: "seg-5", name: "Gajuwaka - Steel Plant", location: "Steel Plant Road", density: 48 },
 ];
 
 export function useTrafficData() {
