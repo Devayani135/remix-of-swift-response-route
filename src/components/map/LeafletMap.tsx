@@ -4,7 +4,7 @@ import "leaflet/dist/leaflet.css";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Navigation, RefreshCw, Clock, Route, Wifi, AlertTriangle, Car } from "lucide-react";
+import { RefreshCw, Route, Wifi, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { useTomTomTraffic } from "@/hooks/useTomTomTraffic";
 import { useLiveNavigation, type RoutePoint } from "@/hooks/useLiveNavigation";
@@ -312,8 +312,8 @@ export function LeafletMap({
       // Shadow layer
       L.polyline(coords, {
         color: '#000000',
-        weight: 14,
-        opacity: 0.25,
+        weight: 16,
+        opacity: 0.3,
         lineCap: 'round',
         lineJoin: 'round',
       }).addTo(mapInstanceRef.current);
@@ -323,7 +323,7 @@ export function LeafletMap({
       
       const graphRoutePolyline = L.polyline(coords, {
         color: routeColor,
-        weight: 10,
+        weight: 12,
         opacity: 1,
         lineCap: 'round',
         lineJoin: 'round',
@@ -332,20 +332,74 @@ export function LeafletMap({
       graphRouteLayerRef.current = graphRoutePolyline;
       graphRoutePolyline.bringToFront();
 
-      // Add waypoint markers
+      // Add direction arrows along the route (Google Maps style)
+      for (let i = 0; i < coords.length - 1; i++) {
+        const start = coords[i];
+        const end = coords[i + 1];
+        const midLat = (start[0] + end[0]) / 2;
+        const midLng = (start[1] + end[1]) / 2;
+        
+        // Calculate rotation angle for arrow
+        const angle = Math.atan2(end[1] - start[1], end[0] - start[0]) * 180 / Math.PI;
+        
+        const arrowIcon = L.divIcon({
+          className: "direction-arrow",
+          html: `<div style="
+            transform: rotate(${angle - 90}deg);
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            text-shadow: 0 0 3px ${routeColor}, 0 0 6px ${routeColor};
+            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
+          ">▲</div>`,
+          iconSize: [16, 16],
+          iconAnchor: [8, 8],
+        });
+
+        L.marker([midLat, midLng], { icon: arrowIcon, interactive: false })
+          .addTo(mapInstanceRef.current!);
+      }
+
+      // Add turn indicators at waypoints with direction info
       calculatedRoute.pathNodes.forEach((node, index) => {
         if (index === 0 || index === calculatedRoute.pathNodes.length - 1) return;
         
+        // Calculate turn direction
+        const prev = calculatedRoute.pathNodes[index - 1];
+        const curr = node;
+        const next = calculatedRoute.pathNodes[index + 1];
+        
+        const angle1 = Math.atan2(curr.lng - prev.lng, curr.lat - prev.lat);
+        const angle2 = Math.atan2(next.lng - curr.lng, next.lat - curr.lat);
+        const turnAngle = (angle2 - angle1) * 180 / Math.PI;
+        
+        let turnSymbol = '•';
+        if (turnAngle > 30) turnSymbol = '↱';
+        else if (turnAngle < -30) turnSymbol = '↰';
+        
         const waypointIcon = L.divIcon({
           className: "waypoint-marker",
-          html: `<div style="background: ${routeColor}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
-          iconSize: [12, 12],
-          iconAnchor: [6, 6],
+          html: `<div style="
+            background: ${routeColor}; 
+            width: 24px; 
+            height: 24px; 
+            border-radius: 50%; 
+            border: 3px solid white; 
+            box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            color: white;
+            font-weight: bold;
+          ">${turnSymbol}</div>`,
+          iconSize: [24, 24],
+          iconAnchor: [12, 12],
         });
 
         L.marker([node.lat, node.lng], { icon: waypointIcon })
           .addTo(mapInstanceRef.current!)
-          .bindPopup(`<b>${node.name}</b><br>Waypoint #${index}`);
+          .bindPopup(`<b>${node.name}</b><br>Step ${index} of ${calculatedRoute.pathNodes.length - 1}`);
       });
     }
   }, [calculatedRoute]);
@@ -691,70 +745,76 @@ export function LeafletMap({
         </div>
       )}
 
-      {/* Turn-by-Turn Navigation Panel */}
-      {calculatedRoute && calculatedRoute.pathNodes.length > 1 && (
-        <div className="absolute bottom-4 right-4 z-[1000] pointer-events-auto max-w-xs">
-          <Card className="bg-background/95 backdrop-blur-sm border-primary/30 p-3">
-            <div className="flex items-center gap-2 mb-2">
-              <Navigation className="h-4 w-4 text-primary" />
-              <span className="text-xs font-semibold">Turn-by-Turn Navigation</span>
-              <Badge variant="outline" className="text-[9px] px-1 py-0 bg-primary/10 border-primary/30 ml-auto">
-                {calculatedRoute.algorithm.toUpperCase()}
-              </Badge>
-            </div>
-            <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
-              {calculatedRoute.pathNodes.slice(0, 8).map((node, index) => {
-                const isCurrentNode = index === Math.min(Math.floor(vehicleProgress / (100 / calculatedRoute.pathNodes.length)), calculatedRoute.pathNodes.length - 1);
-                const isPastNode = index < Math.floor(vehicleProgress / (100 / calculatedRoute.pathNodes.length));
-                
-                return (
-                  <div 
-                    key={`nav-${node.name}-${index}`}
-                    className={`flex items-center gap-2 p-1.5 rounded text-xs ${
-                      isCurrentNode 
-                        ? 'bg-primary/20 border border-primary/30' 
-                        : isPastNode 
-                          ? 'opacity-50' 
-                          : ''
-                    }`}
-                  >
-                    <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                      isCurrentNode 
-                        ? 'bg-primary text-primary-foreground' 
-                        : isPastNode 
-                          ? 'bg-muted text-muted-foreground' 
-                          : 'bg-muted/50 text-muted-foreground'
-                    }`}>
-                      {index + 1}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className={`truncate font-medium ${isCurrentNode ? 'text-primary' : ''}`}>
-                        {node.name}
-                      </p>
-                    </div>
-                    {isCurrentNode && (
-                      <Car className="h-3 w-3 text-primary animate-pulse" />
-                    )}
+      {/* Google Maps-style Navigation Banner */}
+      {calculatedRoute && calculatedRoute.pathNodes.length > 1 && (() => {
+        const currentNodeIdx = Math.min(
+          Math.floor(vehicleProgress / (100 / calculatedRoute.pathNodes.length)), 
+          calculatedRoute.pathNodes.length - 2
+        );
+        const currentNode = calculatedRoute.pathNodes[currentNodeIdx];
+        const nextNode = calculatedRoute.pathNodes[currentNodeIdx + 1];
+        const remainingNodes = calculatedRoute.pathNodes.length - currentNodeIdx - 1;
+        const remainingDistance = (calculatedRoute.totalDistance * (100 - vehicleProgress) / 100).toFixed(1);
+        const remainingTime = Math.round(calculatedRoute.totalTime * (100 - vehicleProgress) / 100);
+        
+        // Calculate turn direction
+        const getTurnDirection = () => {
+          if (currentNodeIdx + 2 >= calculatedRoute.pathNodes.length) return 'destination';
+          const curr = currentNode;
+          const next = nextNode;
+          const afterNext = calculatedRoute.pathNodes[currentNodeIdx + 2];
+          
+          const angle1 = Math.atan2(next.lng - curr.lng, next.lat - curr.lat);
+          const angle2 = Math.atan2(afterNext.lng - next.lng, afterNext.lat - next.lat);
+          const turnAngle = (angle2 - angle1) * 180 / Math.PI;
+          
+          if (Math.abs(turnAngle) < 30) return 'straight';
+          if (turnAngle > 30) return 'right';
+          return 'left';
+        };
+        
+        const turnDir = getTurnDirection();
+        const turnIcon = turnDir === 'left' 
+          ? '↰' 
+          : turnDir === 'right' 
+            ? '↱' 
+            : turnDir === 'destination' 
+              ? '📍' 
+              : '↑';
+        
+        return (
+          <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] pointer-events-auto">
+            <Card className="bg-success/95 backdrop-blur-sm border-success text-success-foreground shadow-2xl min-w-[320px]">
+              <div className="p-4">
+                <div className="flex items-center gap-4">
+                  <div className="text-4xl font-bold">{turnIcon}</div>
+                  <div className="flex-1">
+                    <p className="text-xl font-bold">
+                      {turnDir === 'destination' ? 'Arrive at' : `Continue to`}
+                    </p>
+                    <p className="text-lg opacity-90">{nextNode?.name || destName}</p>
                   </div>
-                );
-              })}
-              {calculatedRoute.pathNodes.length > 8 && (
-                <p className="text-[10px] text-muted-foreground text-center pt-1">
-                  +{calculatedRoute.pathNodes.length - 8} more waypoints
-                </p>
-              )}
-            </div>
-            <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/50 text-xs">
-              <span className="text-muted-foreground">
-                {calculatedRoute.totalDistance.toFixed(1)} km
-              </span>
-              <span className="font-bold text-success">
-                {Math.round(calculatedRoute.totalTime)} min
-              </span>
-            </div>
-          </Card>
-        </div>
-      )}
+                </div>
+                <div className="flex items-center justify-between mt-3 pt-3 border-t border-success-foreground/20">
+                  <div className="flex items-center gap-4">
+                    <div className="text-center">
+                      <p className="text-2xl font-bold">{remainingDistance}</p>
+                      <p className="text-xs opacity-75">km left</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-2xl font-bold">{remainingTime}</p>
+                      <p className="text-xs opacity-75">min</p>
+                    </div>
+                  </div>
+                  <Badge className="bg-success-foreground/20 text-success-foreground border-0">
+                    {calculatedRoute.algorithm.toUpperCase()} • {remainingNodes} stops
+                  </Badge>
+                </div>
+              </div>
+            </Card>
+          </div>
+        );
+      })()}
     </div>
   );
 }
