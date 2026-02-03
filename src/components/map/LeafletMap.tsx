@@ -4,7 +4,7 @@ import "leaflet/dist/leaflet.css";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Navigation, RefreshCw, Clock, Route, MapPin, Loader2, Wifi, AlertTriangle, Car, Play, Pause, Download } from "lucide-react";
+import { Navigation, RefreshCw, Clock, Route, Wifi, AlertTriangle, Car } from "lucide-react";
 import { toast } from "sonner";
 import { useTomTomTraffic } from "@/hooks/useTomTomTraffic";
 import { useLiveNavigation, type RoutePoint } from "@/hooks/useLiveNavigation";
@@ -97,12 +97,10 @@ export function LeafletMap({
   const startMarkerRef = useRef<L.Marker | null>(null);
   const endMarkerRef = useRef<L.Marker | null>(null);
   const [showAllRoutes, setShowAllRoutes] = useState(false);
-  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [isLocating, setIsLocating] = useState(false);
   const [majorIncidents, setMajorIncidents] = useState<FilteredIncident[]>([]);
 
-  // Get current source location (user location or default)
-  const sourceLocation = userLocation || sourceCoords;
+  // Get current source location
+  const sourceLocation = sourceCoords;
 
   // Use TomTom traffic data hook
   const {
@@ -504,58 +502,6 @@ export function LeafletMap({
     }
   }, [fastestRoute, activeRoute, onRouteChange, refreshTrafficData]);
 
-  // Handle use my location
-  const handleUseMyLocation = useCallback(() => {
-    if (!navigator.geolocation) {
-      toast.error("Geolocation is not supported by your browser");
-      return;
-    }
-
-    setIsLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude } = position.coords;
-        const newLocation = { lat: latitude, lng: longitude };
-        setUserLocation(newLocation);
-        
-        if (startMarkerRef.current && mapInstanceRef.current) {
-          startMarkerRef.current.setLatLng([latitude, longitude]);
-          mapInstanceRef.current.panTo([latitude, longitude]);
-        }
-        
-        if (vehicleMarkerRef.current) {
-          vehicleMarkerRef.current.setLatLng([latitude, longitude]);
-        }
-        
-        toast.success("Location updated to your current position");
-        setIsLocating(false);
-      },
-      (error) => {
-        let message = "Unable to get your location";
-        switch (error.code) {
-          case error.PERMISSION_DENIED:
-            message = "Location permission denied";
-            break;
-          case error.POSITION_UNAVAILABLE:
-            message = "Location unavailable";
-            break;
-          case error.TIMEOUT:
-            message = "Location request timed out";
-            break;
-        }
-        toast.error(message);
-        setIsLocating(false);
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
-  }, []);
-
-  // Handle download OSM data
-  const handleDownloadOSM = useCallback(() => {
-    window.open('/data/vizag-road-network.csv', '_blank');
-    toast.success("Downloading Vizag road network data...");
-  }, []);
-
   // Get active route data
   const activeRouteData = useMemo(() => {
     return routesWithTraffic.find(r => r.key === activeRoute);
@@ -611,15 +557,6 @@ export function LeafletMap({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => isNavigating ? stopNavigation() : startNavigation()}
-            className="bg-background/90 backdrop-blur-sm border-primary"
-          >
-            {isNavigating ? <Pause className="mr-1.5 h-3.5 w-3.5" /> : <Play className="mr-1.5 h-3.5 w-3.5" />}
-            {isNavigating ? "Pause" : "Start"}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
             onClick={handleReroute}
             disabled={isLoading || isRerouting}
             className={`bg-background/90 backdrop-blur-sm ${
@@ -639,29 +576,6 @@ export function LeafletMap({
           >
             <Route className="mr-1.5 h-3.5 w-3.5" />
             {showAllRoutes ? "Hide Routes" : "Show All"}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleUseMyLocation}
-            disabled={isLocating}
-            className={`bg-background/90 backdrop-blur-sm ${userLocation ? "border-success text-success" : ""}`}
-          >
-            {isLocating ? (
-              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <MapPin className="mr-1.5 h-3.5 w-3.5" />
-            )}
-            {isLocating ? "Locating..." : userLocation ? "Located" : "My Location"}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleDownloadOSM}
-            className="bg-background/90 backdrop-blur-sm"
-          >
-            <Download className="mr-1.5 h-3.5 w-3.5" />
-            OSM Data
           </Button>
         </div>
       </div>
@@ -777,33 +691,70 @@ export function LeafletMap({
         </div>
       )}
 
-      {/* ETA Display with Navigation Progress */}
-      <div className="absolute bottom-4 right-4 z-[1000] pointer-events-auto">
-        <Card className="bg-background/95 backdrop-blur-sm border-border/50 p-3">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-full bg-success/10">
-              <Clock className="h-4 w-4 text-success" />
+      {/* Turn-by-Turn Navigation Panel */}
+      {calculatedRoute && calculatedRoute.pathNodes.length > 1 && (
+        <div className="absolute bottom-4 right-4 z-[1000] pointer-events-auto max-w-xs">
+          <Card className="bg-background/95 backdrop-blur-sm border-primary/30 p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <Navigation className="h-4 w-4 text-primary" />
+              <span className="text-xs font-semibold">Turn-by-Turn Navigation</span>
+              <Badge variant="outline" className="text-[9px] px-1 py-0 bg-primary/10 border-primary/30 ml-auto">
+                {calculatedRoute.algorithm.toUpperCase()}
+              </Badge>
             </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Estimated Arrival</p>
-              <p className="text-lg font-bold font-mono text-success">
-                {calculatedRoute ? Math.round(calculatedRoute.totalTime) : liveRoute?.estimatedTime || activeRouteData?.estimatedTime || ROUTE_DEFINITIONS.find(r => r.key === activeRoute)?.baseTime || '--'} min
-              </p>
-              <div className="flex items-center gap-2 mt-1">
-                <div className="w-20 h-1.5 bg-muted rounded-full overflow-hidden">
+            <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
+              {calculatedRoute.pathNodes.slice(0, 8).map((node, index) => {
+                const isCurrentNode = index === Math.min(Math.floor(vehicleProgress / (100 / calculatedRoute.pathNodes.length)), calculatedRoute.pathNodes.length - 1);
+                const isPastNode = index < Math.floor(vehicleProgress / (100 / calculatedRoute.pathNodes.length));
+                
+                return (
                   <div 
-                    className="h-full bg-success rounded-full transition-all duration-300"
-                    style={{ width: `${vehicleProgress}%` }}
-                  />
-                </div>
-                <span className="text-[10px] text-muted-foreground">
-                  {Math.round(vehicleProgress)}%
-                </span>
-              </div>
+                    key={`nav-${node.name}-${index}`}
+                    className={`flex items-center gap-2 p-1.5 rounded text-xs ${
+                      isCurrentNode 
+                        ? 'bg-primary/20 border border-primary/30' 
+                        : isPastNode 
+                          ? 'opacity-50' 
+                          : ''
+                    }`}
+                  >
+                    <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                      isCurrentNode 
+                        ? 'bg-primary text-primary-foreground' 
+                        : isPastNode 
+                          ? 'bg-muted text-muted-foreground' 
+                          : 'bg-muted/50 text-muted-foreground'
+                    }`}>
+                      {index + 1}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`truncate font-medium ${isCurrentNode ? 'text-primary' : ''}`}>
+                        {node.name}
+                      </p>
+                    </div>
+                    {isCurrentNode && (
+                      <Car className="h-3 w-3 text-primary animate-pulse" />
+                    )}
+                  </div>
+                );
+              })}
+              {calculatedRoute.pathNodes.length > 8 && (
+                <p className="text-[10px] text-muted-foreground text-center pt-1">
+                  +{calculatedRoute.pathNodes.length - 8} more waypoints
+                </p>
+              )}
             </div>
-          </div>
-        </Card>
-      </div>
+            <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/50 text-xs">
+              <span className="text-muted-foreground">
+                {calculatedRoute.totalDistance.toFixed(1)} km
+              </span>
+              <span className="font-bold text-success">
+                {Math.round(calculatedRoute.totalTime)} min
+              </span>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
